@@ -1,0 +1,56 @@
+{
+  "soc_id": "generic_arm64",
+  "name": "Generic ARM64 CPU",
+  "vendor": "generic",
+
+  "l1_cache_kb": 32,
+  "l2_cache_kb": 512,
+  "l3_cache_kb": 2048,
+  "ram_bandwidth_gbps": 25,
+
+  "cpu": {
+    "num_big_cores": 4,
+    "num_mid_cores": 0,
+    "num_little_cores": 4,
+    "big_core_freq_mhz": 2000,
+    "mid_core_freq_mhz": 0,
+    "little_core_freq_mhz": 1400,
+    "has_neon": true,
+    "has_dotprod": false,
+    "has_i8mm": false,
+    "has_sve": false,
+    "has_sve2": false
+  },
+
+  "gpu":  { "present": false },
+  "npu":  { "present": false },
+  "dsp":  { "present": false },
+
+  "supported_dtypes": {
+    "cpu": ["f32", "f16", "i8", "u8"],
+    "gpu": [],
+    "npu": [],
+    "dsp": []
+  },
+
+  "cost_table": [
+    {
+      "op": "MatMul", "input_dtype": "f16", "weight_dtype": "f16",
+      "M": 1,    "K": 4096, "N": 4096,
+      "cpu_ms": 42.0, "gpu_ms": -1, "npu_ms": -1, "dsp_ms": -1,
+      "cpu_mw": 600,  "gpu_mw": -1,  "npu_mw": -1, "dsp_mw": -1
+    },
+    {
+      "op": "MatMul", "input_dtype": "i8", "weight_dtype": "i8",
+      "M": 1,    "K": 4096, "N": 4096,
+      "cpu_ms": 28.0, "gpu_ms": -1, "npu_ms": -1, "dsp_ms": -1,
+      "cpu_mw": 400,  "gpu_mw": -1,  "npu_mw": -1, "dsp_mw": -1
+    },
+    {
+      "op": "MatMul", "input_dtype": "i8", "weight_dtype": "i4",
+      "M": 1,    "K": 4096, "N": 4096,
+      "cpu_ms": 18.0, "gpu_ms": -1, "npu_ms": -1, "dsp_ms": -1,
+      "cpu_mw": 300,  "gpu_mw": -1,  "npu_mw": -1, "dsp_mw": -1
+    }
+  ]
+}

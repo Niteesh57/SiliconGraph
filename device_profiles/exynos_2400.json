@@ -1,0 +1,84 @@
+{
+  "soc_id": "exynos_2400",
+  "name": "Samsung Exynos 2400",
+  "vendor": "samsung",
+
+  "l1_cache_kb": 64,
+  "l2_cache_kb": 2048,
+  "l3_cache_kb": 16384,
+  "ram_bandwidth_gbps": 77,
+
+  "cpu": {
+    "num_big_cores": 1,
+    "num_mid_cores": 5,
+    "num_little_cores": 4,
+    "big_core_freq_mhz": 3200,
+    "mid_core_freq_mhz": 2900,
+    "little_core_freq_mhz": 2000,
+    "has_neon": true,
+    "has_dotprod": true,
+    "has_i8mm": true,
+    "has_sve": false,
+    "has_sve2": false
+  },
+
+  "gpu": {
+    "present": true,
+    "name": "Xclipse 940 (AMD RDNA3)",
+    "compute_units": 12,
+    "freq_mhz": 1200,
+    "supports_vulkan": true,
+    "supports_opencl": true,
+    "supports_metal": false,
+    "fp16_tflops": 5.0,
+    "fp32_tflops": 2.5
+  },
+
+  "npu": {
+    "present": true,
+    "name": "Samsung NPU (Xclipse)",
+    "has_samsung_npu": true,
+    "tops_int8": 34,
+    "tops_int4": 68,
+    "supported_dtypes": ["i8", "i4", "f16"],
+    "delegate": "eden_npu"
+  },
+
+  "dsp": {
+    "present": false
+  },
+
+  "supported_dtypes": {
+    "cpu":  ["f32", "f16", "bf16", "i8", "i4", "u8"],
+    "gpu":  ["f32", "f16", "i8"],
+    "npu":  ["i8", "i4", "f16"],
+    "dsp":  []
+  },
+
+  "cost_table": [
+    {
+      "op": "MatMul", "input_dtype": "f16", "weight_dtype": "f16",
+      "M": 1, "K": 4096, "N": 4096,
+      "cpu_ms": 13.2, "gpu_ms": 3.5, "npu_ms": 2.1, "dsp_ms": -1,
+      "cpu_mw": 800, "gpu_mw": 1200, "npu_mw": 550, "dsp_mw": -1
+    },
+    {
+      "op": "MatMul", "input_dtype": "i8", "weight_dtype": "i8",
+      "M": 1, "K": 4096, "N": 4096,
+      "cpu_ms": 7.9, "gpu_ms": 2.6, "npu_ms": 1.2, "dsp_ms": -1,
+      "cpu_mw": 420, "gpu_mw": 900, "npu_mw": 310, "dsp_mw": -1
+    },
+    {
+      "op": "MatMul", "input_dtype": "i8", "weight_dtype": "i4",
+      "M": 1, "K": 4096, "N": 4096,
+      "cpu_ms": 5.1, "gpu_ms": 1.9, "npu_ms": 0.9, "dsp_ms": -1,
+      "cpu_mw": 340, "gpu_mw": 780, "npu_mw": 230, "dsp_mw": -1
+    },
+    {
+      "op": "GroupQueryAttention", "input_dtype": "f16", "weight_dtype": "f16",
+      "M": 1, "K": 4096, "N": 4096,
+      "cpu_ms": 6.1, "gpu_ms": 1.9, "npu_ms": 1.7, "dsp_ms": -1,
+      "cpu_mw": 620, "gpu_mw": 1000, "npu_mw": 470, "dsp_mw": -1
+    }
+  ]
+}

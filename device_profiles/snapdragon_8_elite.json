@@ -1,0 +1,98 @@
+{
+  "soc_id": "snapdragon_8_elite",
+  "name": "Snapdragon 8 Elite",
+  "vendor": "qualcomm",
+
+  "l1_cache_kb": 128,
+  "l2_cache_kb": 4096,
+  "l3_cache_kb": 12288,
+  "ram_bandwidth_gbps": 85,
+
+  "cpu": {
+    "num_big_cores": 2,
+    "num_mid_cores": 6,
+    "num_little_cores": 0,
+    "big_core_freq_mhz": 4320,
+    "mid_core_freq_mhz": 3530,
+    "little_core_freq_mhz": 0,
+    "has_neon": true,
+    "has_dotprod": true,
+    "has_i8mm": true,
+    "has_sve2": true,
+    "has_sve": true
+  },
+
+  "gpu": {
+    "present": true,
+    "name": "Adreno 830",
+    "compute_units": 192,
+    "freq_mhz": 1000,
+    "supports_vulkan": true,
+    "supports_opencl": true,
+    "supports_metal": false,
+    "fp16_tflops": 6.8,
+    "fp32_tflops": 3.4
+  },
+
+  "npu": {
+    "present": true,
+    "name": "Hexagon HTP v79",
+    "has_hexagon": true,
+    "tops_int8": 85,
+    "tops_int4": 170,
+    "supported_dtypes": ["i8", "i4", "f16", "f8_e4m3"],
+    "delegate": "qnn_htp"
+  },
+
+  "dsp": {
+    "present": true,
+    "name": "Hexagon DSP v86",
+    "freq_mhz": 1700
+  },
+
+  "supported_dtypes": {
+    "cpu":  ["f32", "f16", "bf16", "i8", "i4", "u8"],
+    "gpu":  ["f32", "f16", "f8_e4m3", "i8"],
+    "npu":  ["i8", "i4", "f16", "f8_e4m3"],
+    "dsp":  ["i8", "u8"]
+  },
+
+  "cost_table": [
+    {
+      "op": "MatMul", "input_dtype": "f16", "weight_dtype": "f16",
+      "M": 1, "K": 4096, "N": 4096,
+      "cpu_ms": 10.5, "gpu_ms": 2.9, "npu_ms": 0.8, "dsp_ms": 6.5,
+      "cpu_mw": 900,  "gpu_mw": 1300, "npu_mw": 420, "dsp_mw": 650
+    },
+    {
+      "op": "MatMul", "input_dtype": "i8", "weight_dtype": "i8",
+      "M": 1, "K": 4096, "N": 4096,
+      "cpu_ms": 5.8, "gpu_ms": 2.1, "npu_ms": 0.5, "dsp_ms": 3.5,
+      "cpu_mw": 500,  "gpu_mw": 1000, "npu_mw": 210, "dsp_mw": 320
+    },
+    {
+      "op": "MatMul", "input_dtype": "i8", "weight_dtype": "i4",
+      "M": 1, "K": 4096, "N": 4096,
+      "cpu_ms": 3.9, "gpu_ms": 1.6, "npu_ms": 0.3, "dsp_ms": 2.4,
+      "cpu_mw": 380,  "gpu_mw": 850,  "npu_mw": 140, "dsp_mw": 240
+    },
+    {
+      "op": "GroupQueryAttention", "input_dtype": "f16", "weight_dtype": "f16",
+      "M": 1, "K": 4096, "N": 4096,
+      "cpu_ms": 4.8, "gpu_ms": 1.4, "npu_ms": 0.6, "dsp_ms": 3.2,
+      "cpu_mw": 700, "gpu_mw": 1100, "npu_mw": 310, "dsp_mw": 520
+    },
+    {
+      "op": "RMSNorm", "input_dtype": "f16", "weight_dtype": "f16",
+      "M": 1, "K": 4096, "N": 4096,
+      "cpu_ms": 0.25, "gpu_ms": 0.4, "npu_ms": -1, "dsp_ms": 0.3,
+      "cpu_mw": 90, "gpu_mw": 180, "npu_mw": -1, "dsp_mw": 130
+    },
+    {
+      "op": "MatMul", "input_dtype": "f8_e4m3", "weight_dtype": "f8_e4m3",
+      "M": 1, "K": 4096, "N": 4096,
+      "cpu_ms": 4.2, "gpu_ms": 1.3, "npu_ms": 0.35, "dsp_ms": -1,
+      "cpu_mw": 450, "gpu_mw": 900, "npu_mw": 180, "dsp_mw": -1
+    }
+  ]
+}

@@ -1,0 +1,93 @@
+{
+  "soc_id": "apple_m4",
+  "name": "Apple M4",
+  "vendor": "apple",
+
+  "l1_cache_kb": 192,
+  "l2_cache_kb": 16384,
+  "l3_cache_kb": 0,
+  "l4_cache_mb": 32,
+  "ram_bandwidth_gbps": 120,
+  "unified_memory": true,
+
+  "cpu": {
+    "num_big_cores": 4,
+    "num_mid_cores": 6,
+    "num_little_cores": 0,
+    "big_core_freq_mhz": 4400,
+    "mid_core_freq_mhz": 2800,
+    "little_core_freq_mhz": 0,
+    "has_neon": true,
+    "has_dotprod": true,
+    "has_i8mm": true,
+    "has_amx": true,
+    "has_sve": false,
+    "has_sve2": false
+  },
+
+  "gpu": {
+    "present": true,
+    "name": "Apple GPU 10-core",
+    "compute_units": 10,
+    "freq_mhz": 1450,
+    "supports_vulkan": false,
+    "supports_opencl": false,
+    "supports_metal": true,
+    "fp16_tflops": 10.5,
+    "fp32_tflops": 5.25
+  },
+
+  "npu": {
+    "present": true,
+    "name": "Apple Neural Engine Gen 5",
+    "has_apple_ane": true,
+    "tops_int8": 38,
+    "tops_int4": 76,
+    "supported_dtypes": ["f16", "f8_e4m3", "i8"],
+    "delegate": "coreml"
+  },
+
+  "dsp": {
+    "present": false
+  },
+
+  "supported_dtypes": {
+    "cpu":  ["f32", "f16", "bf16", "i8", "i4", "u8"],
+    "gpu":  ["f32", "f16", "f8_e4m3", "bf16"],
+    "npu":  ["f16", "f8_e4m3", "i8"],
+    "dsp":  []
+  },
+
+  "cost_table": [
+    {
+      "op": "MatMul", "input_dtype": "f16", "weight_dtype": "f16",
+      "M": 1, "K": 4096, "N": 4096,
+      "cpu_ms": 7.8, "gpu_ms": 1.5, "npu_ms": 0.55, "dsp_ms": -1,
+      "cpu_mw": 620, "gpu_mw": 850, "npu_mw": 300, "dsp_mw": -1
+    },
+    {
+      "op": "MatMul", "input_dtype": "f8_e4m3", "weight_dtype": "f8_e4m3",
+      "M": 1, "K": 4096, "N": 4096,
+      "cpu_ms": 4.9, "gpu_ms": 1.0, "npu_ms": 0.38, "dsp_ms": -1,
+      "cpu_mw": 450, "gpu_mw": 650, "npu_mw": 210, "dsp_mw": -1
+    },
+    {
+      "op": "MatMul", "input_dtype": "i8", "weight_dtype": "i8",
+      "M": 1, "K": 4096, "N": 4096,
+      "cpu_ms": 3.8, "gpu_ms": 0.85, "npu_ms": 0.3, "dsp_ms": -1,
+      "cpu_mw": 320, "gpu_mw": 550, "npu_mw": 170, "dsp_mw": -1
+    },
+    {
+      "op": "GroupQueryAttention", "input_dtype": "f16", "weight_dtype": "f16",
+      "M": 1, "K": 4096, "N": 4096,
+      "cpu_ms": 3.5, "gpu_ms": 0.9, "npu_ms": 0.42, "dsp_ms": -1,
+      "cpu_mw": 490, "gpu_mw": 700, "npu_mw": 240, "dsp_mw": -1
+    },
+    {
+      "op": "RMSNorm", "input_dtype": "f16", "weight_dtype": "f16",
+      "M": 1, "K": 4096, "N": 4096,
+      "cpu_ms": 0.18, "gpu_ms": 0.3, "npu_ms": -1, "dsp_ms": -1,
+      "cpu_mw": 70, "gpu_mw": 160, "npu_mw": -1, "dsp_mw": -1
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "arm-ai-compiler",
+  "version": "0.1.0",
+  "description": "Universal AI Model Optimizer for ARM Devices",
+  "dependencies": [
+    {
+      "name": "nlohmann-json",
+      "version>=": "3.11.2"
+    },
+    {
+      "name": "flatbuffers",
+      "version>=": "24.3.25"
+    },
+    {
+      "name": "libzip",
+      "version>=": "1.10.1"
+    },
+    {
+      "name": "gtest",
+      "version>=": "1.14.0"
+    },
+    {
+      "name": "benchmark",
+      "version>=": "1.8.3"
+    }
+  ]
+}

@@ -1,0 +1,79 @@
+{
+  "soc_id": "apple_a18",
+  "name": "Apple A18",
+  "vendor": "apple",
+
+  "l1_cache_kb": 128,
+  "l2_cache_kb": 4096,
+  "l3_cache_kb": 16384,
+  "ram_bandwidth_gbps": 68,
+
+  "cpu": {
+    "num_big_cores": 2,
+    "num_mid_cores": 4,
+    "num_little_cores": 0,
+    "big_core_freq_mhz": 4050,
+    "mid_core_freq_mhz": 2200,
+    "little_core_freq_mhz": 0,
+    "has_neon": true,
+    "has_dotprod": true,
+    "has_i8mm": true,
+    "has_amx": true,
+    "has_sve": false,
+    "has_sve2": false
+  },
+
+  "gpu": {
+    "present": true,
+    "name": "Apple GPU 6-core",
+    "compute_units": 6,
+    "freq_mhz": 1398,
+    "supports_vulkan": false,
+    "supports_opencl": false,
+    "supports_metal": true,
+    "fp16_tflops": 5.5,
+    "fp32_tflops": 2.75
+  },
+
+  "npu": {
+    "present": true,
+    "name": "Apple Neural Engine (ANE)",
+    "has_apple_ane": true,
+    "tops_int8": 35,
+    "tops_int4": 70,
+    "supported_dtypes": ["f16", "f8_e4m3", "i8"],
+    "delegate": "coreml"
+  },
+
+  "dsp": {
+    "present": false
+  },
+
+  "supported_dtypes": {
+    "cpu":  ["f32", "f16", "bf16", "i8", "i4", "u8"],
+    "gpu":  ["f32", "f16", "f8_e4m3"],
+    "npu":  ["f16", "f8_e4m3", "i8"],
+    "dsp":  []
+  },
+
+  "cost_table": [
+    {
+      "op": "MatMul", "input_dtype": "f16", "weight_dtype": "f16",
+      "M": 1,    "K": 4096, "N": 4096,
+      "cpu_ms": 9.2,  "gpu_ms": 2.1, "npu_ms": 0.7, "dsp_ms": -1,
+      "cpu_mw": 700,  "gpu_mw": 950,  "npu_mw": 350, "dsp_mw": -1
+    },
+    {
+      "op": "MatMul", "input_dtype": "f8_e4m3", "weight_dtype": "f8_e4m3",
+      "M": 1,    "K": 4096, "N": 4096,
+      "cpu_ms": 5.8,  "gpu_ms": 1.4, "npu_ms": 0.45,"dsp_ms": -1,
+      "cpu_mw": 500,  "gpu_mw": 750,  "npu_mw": 250, "dsp_mw": -1
+    },
+    {
+      "op": "GroupQueryAttention", "input_dtype": "f16", "weight_dtype": "f16",
+      "M": 1, "K": 4096, "N": 4096,
+      "cpu_ms": 4.1,  "gpu_ms": 1.2, "npu_ms": 0.55,"dsp_ms": -1,
+      "cpu_mw": 550,  "gpu_mw": 800,  "npu_mw": 280, "dsp_mw": -1
+    }
+  ]
+}

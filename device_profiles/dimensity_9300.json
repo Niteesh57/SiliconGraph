@@ -1,0 +1,85 @@
+{
+  "soc_id": "dimensity_9300",
+  "name": "MediaTek Dimensity 9300",
+  "vendor": "mediatek",
+
+  "l1_cache_kb": 64,
+  "l2_cache_kb": 2048,
+  "l3_cache_kb": 16384,
+  "ram_bandwidth_gbps": 77,
+
+  "cpu": {
+    "num_big_cores": 4,
+    "num_mid_cores": 4,
+    "num_little_cores": 0,
+    "big_core_freq_mhz": 3250,
+    "mid_core_freq_mhz": 2850,
+    "little_core_freq_mhz": 0,
+    "has_neon": true,
+    "has_dotprod": true,
+    "has_i8mm": true,
+    "has_sve": false,
+    "has_sve2": false
+  },
+
+  "gpu": {
+    "present": true,
+    "name": "Immortalis-G720 MC12",
+    "compute_units": 12,
+    "freq_mhz": 1300,
+    "supports_vulkan": true,
+    "supports_opencl": true,
+    "supports_metal": false,
+    "fp16_tflops": 5.0,
+    "fp32_tflops": 2.5
+  },
+
+  "npu": {
+    "present": true,
+    "name": "APU 790",
+    "has_hexagon": false,
+    "has_mediatek_apu": true,
+    "tops_int8": 45,
+    "tops_int4": 90,
+    "supported_dtypes": ["i8", "i4", "f16"],
+    "delegate": "neuripilot"
+  },
+
+  "dsp": {
+    "present": false
+  },
+
+  "supported_dtypes": {
+    "cpu":  ["f32", "f16", "bf16", "i8", "i4", "u8"],
+    "gpu":  ["f32", "f16", "i8"],
+    "npu":  ["i8", "i4", "f16"],
+    "dsp":  []
+  },
+
+  "cost_table": [
+    {
+      "op": "MatMul", "input_dtype": "f16", "weight_dtype": "f16",
+      "M": 1,    "K": 4096, "N": 4096,
+      "cpu_ms": 12.8, "gpu_ms": 3.2, "npu_ms": 1.9, "dsp_ms": -1,
+      "cpu_mw": 750,  "gpu_mw": 1100, "npu_mw": 500, "dsp_mw": -1
+    },
+    {
+      "op": "MatMul", "input_dtype": "i8", "weight_dtype": "i8",
+      "M": 1,    "K": 4096, "N": 4096,
+      "cpu_ms": 7.4,  "gpu_ms": 2.5, "npu_ms": 1.1, "dsp_ms": -1,
+      "cpu_mw": 380,  "gpu_mw": 850,  "npu_mw": 280, "dsp_mw": -1
+    },
+    {
+      "op": "MatMul", "input_dtype": "i8", "weight_dtype": "i4",
+      "M": 1,    "K": 4096, "N": 4096,
+      "cpu_ms": 4.9,  "gpu_ms": 1.8, "npu_ms": 0.8, "dsp_ms": -1,
+      "cpu_mw": 320,  "gpu_mw": 750,  "npu_mw": 200, "dsp_mw": -1
+    },
+    {
+      "op": "GroupQueryAttention", "input_dtype": "f16", "weight_dtype": "f16",
+      "M": 1, "K": 4096, "N": 4096,
+      "cpu_ms": 5.8,  "gpu_ms": 1.7, "npu_ms": 1.4, "dsp_ms": -1,
+      "cpu_mw": 580,  "gpu_mw": 950,  "npu_mw": 420, "dsp_mw": -1
+    }
+  ]
+}
