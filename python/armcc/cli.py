@@ -66,6 +66,36 @@ def _build_compile_parser(sub) -> argparse.ArgumentParser:
     return p
 
 
+def _buildCppCompileCommand(
+    armcc_bin: str,
+    graph_json: str,
+    targets: str,
+    quantization: str,
+    context_lengths: str,
+    work_dir: str,
+    output_path: str,
+    calibration_path: str | None = None,
+    verbose: bool = False,
+) -> list[str]:
+    """Build the C++ compiler command with all generated package assets."""
+    work_path = Path(work_dir)
+    cmd = [
+        armcc_bin, "compile",
+        "--graph", graph_json,
+        "--targets", targets,
+        "--quant", quantization,
+        "--context-lengths", context_lengths,
+        "--tokenizer-dir", str(work_path / "tokenizer"),
+        "--runtime-config", str(work_path / "runtime_config.json"),
+        "--output", output_path,
+    ]
+    if calibration_path:
+        cmd += ["--calibration", calibration_path]
+    if verbose:
+        cmd += ["--verbose"]
+    return cmd
+
+
 def _cmd_compile(args) -> int:
     """Execute the compile command."""
     from armcc.model_loader    import ModelLoader
@@ -151,17 +181,17 @@ def _cmd_compile(args) -> int:
     armcc_bin = _findArmccBinary()
     if armcc_bin:
         import subprocess
-        cmd = [
-            armcc_bin, "compile",
-            "--graph",    graph_json,
-            "--targets",  args.targets,
-            "--quant",    args.quantization,
-            "--output",   output_path,
-        ]
-        if calib_path:
-            cmd += ["--calibration", calib_path]
-        if args.verbose:
-            cmd += ["--verbose"]
+        cmd = _buildCppCompileCommand(
+            armcc_bin=armcc_bin,
+            graph_json=graph_json,
+            targets=args.targets,
+            quantization=args.quantization,
+            context_lengths=args.context_lengths,
+            work_dir=work_dir,
+            output_path=output_path,
+            calibration_path=calib_path,
+            verbose=args.verbose,
+        )
 
         logger.info(f"Running: {' '.join(cmd)}")
         ret = subprocess.run(cmd)

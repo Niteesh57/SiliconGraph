@@ -34,6 +34,8 @@
 #include <filesystem>
 #include <chrono>
 #include <algorithm>
+#include <cstdint>
+#include <limits>
 
 namespace fs = std::filesystem;
 using json   = nlohmann::json;
@@ -68,6 +70,62 @@ static bool argFlag(int argc, char** argv, const std::string& key) {
     if (std::string(argv[i]) == key) return true;
   }
   return false;
+}
+
+// ---------------------------------------------------------------------------
+// Helper: parse a comma-separated list of positive unsigned integer values.
+// ---------------------------------------------------------------------------
+static bool parsePositiveUIntCSV(const std::string& csv,
+                                 std::vector<uint32_t>& values,
+                                 std::string& error) {
+  values.clear();
+  for (const auto& token : splitCSV(csv)) {
+    try {
+      size_t consumed = 0;
+      unsigned long value = std::stoul(token, &consumed, 10);
+      if (consumed != token.size() || value == 0 ||
+          value > std::numeric_limits<uint32_t>::max()) {
+        error = "invalid positive integer: " + token;
+        return false;
+      }
+      values.push_back(static_cast<uint32_t>(value));
+    } catch (const std::exception&) {
+      error = "invalid positive integer: " + token;
+      return false;
+    }
+  }
+
+  if (values.empty()) {
+    error = "at least one value is required";
+    return false;
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Helper: read the Python-generated runtime configuration when it is present.
+// ---------------------------------------------------------------------------
+static bool loadRuntimeConfig(const std::string& path,
+                              armcc::pkg::RuntimeConfig& config,
+                              std::string& error) {
+  if (path.empty()) return true;
+
+  std::ifstream f(path);
+  if (!f) {
+    error = "cannot open runtime config: " + path;
+    return false;
+  }
+
+  std::ostringstream contents;
+  contents << f.rdbuf();
+  try {
+    json::parse(contents.str());
+    config = armcc::pkg::RuntimeConfig::fromJSON(contents.str());
+  } catch (const std::exception& e) {
+    error = std::string("invalid runtime config: ") + e.what();
+    return false;
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -160,7 +218,10 @@ static int cmdCompile(int argc, char** argv) {
   std::string graph_json  = argValue(argc, argv, "--graph");
   std::string targets_csv = argValue(argc, argv, "--targets", "generic_arm64");
   std::string quant_str   = argValue(argc, argv, "--quant", "int8");
+  std::string contexts_csv = argValue(argc, argv, "--context-lengths");
   std::string calib_json  = argValue(argc, argv, "--calibration");
+  std::string tokenizer_dir = argValue(argc, argv, "--tokenizer-dir");
+  std::string runtime_config_path = argValue(argc, argv, "--runtime-config");
   std::string output_path = argValue(argc, argv, "--output", "model.armpack");
   bool        verbose     = argFlag(argc, argv, "--verbose");
 
@@ -209,6 +270,13 @@ static int cmdCompile(int argc, char** argv) {
   // ── Build graph family spec ─────────────────────────────────────────────
   armcc::generator::GraphFamilySpec spec;
   spec.target_socs = target_socs;
+  if (!contexts_csv.empty()) {
+    std::string error;
+    if (!parsePositiveUIntCSV(contexts_csv, spec.context_lengths, error)) {
+      std::cerr << "[armcc] ERROR: Invalid --context-lengths: " << error << "\n";
+      return 1;
+    }
+  }
 
   // Quantization dtypes
   armcc::ir::DType main_quant = armcc::ir::DType::INT8;
@@ -270,8 +338,14 @@ static int cmdCompile(int argc, char** argv) {
   armcc::pkg::PackageGeneratorOptions pkg_opts;
   pkg_opts.output_path = output_path;
   pkg_opts.overwrite   = true;
+  pkg_opts.tokenizer_dir = tokenizer_dir;
 
   armcc::pkg::RuntimeConfig rt_cfg;
+  std::string runtime_config_error;
+  if (!loadRuntimeConfig(runtime_config_path, rt_cfg, runtime_config_error)) {
+    std::cerr << "[armcc] ERROR: " << runtime_config_error << "\n";
+    return 1;
+  }
   armcc::pkg::PackageGenerator pkg_gen(pkg_opts);
 
   bool ok = pkg_gen.generate(
@@ -334,7 +408,9 @@ int main(int argc, char** argv) {
   if (argc < 2) {
     std::cerr << "ARM AI Compiler v0.1.0\n\n"
               << "Usage:\n"
-              << "  armcc compile  --graph <json> --targets <csv> --quant <dtype> --output <pack>\n"
+              << "  armcc compile  --graph <json> --targets <csv> --quant <dtype>\n"
+              << "                 --context-lengths <csv> --tokenizer-dir <dir>\n"
+              << "                 --runtime-config <json> --output <pack>\n"
               << "  armcc inspect  <model.armpack>\n"
               << "  armcc ir-dump  <exported_graph.json>\n"
               << "\nRun 'armcc <command> --help' for more details.\n";

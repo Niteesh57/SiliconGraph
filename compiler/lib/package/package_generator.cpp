@@ -607,6 +607,7 @@ RuntimeConfig RuntimeConfig::fromJSON(const std::string& s) {
     cfg.top_k              = j.value("top_k", 50);
     cfg.repetition_penalty = j.value("repetition_penalty", 1.0f);
     cfg.max_new_tokens     = j.value("max_new_tokens", 512);
+    cfg.min_new_tokens     = j.value("min_new_tokens", 0);
     cfg.bos_token_id       = j.value("bos_token_id", 1);
     cfg.eos_token_id       = j.value("eos_token_id", 2);
     cfg.pad_token_id       = j.value("pad_token_id", 0);

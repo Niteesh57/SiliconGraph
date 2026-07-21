@@ -84,6 +84,23 @@ cmake -B build -G Ninja \
 cmake --build build
 ```
 
+### Arm CPU micro-kernels (Android/Arm builds)
+
+Enable KleidiAI for an Arm target to compile the project with Arm's optimized
+CPU micro-kernels available to downstream runtime integrations:
+
+```bash
+cmake -B build-arm -G Ninja \
+  -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
+  -DANDROID_ABI=arm64-v8a \
+  -DARMCC_ENABLE_KLEIDIAI=ON
+cmake --build build-arm
+```
+
+KleidiAI is Arm-only, so this option intentionally remains off for x86 host
+development builds. The build fetches the pinned `v1.28.0` release by default;
+set `ARMCC_KLEIDIAI_SOURCE_DIR` to use an audited local checkout instead.
+
 **Dependencies** (see `vcpkg.json`):
 - LLVM/MLIR ≥ 18
 - FlatBuffers ≥ 24.3

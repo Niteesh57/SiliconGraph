@@ -84,4 +84,5 @@ target_link_libraries(armcc_all INTERFACE
   armcc_generator
   armcc_memory
   armcc_package
+  armcc_kleidiai
 )

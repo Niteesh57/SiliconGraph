@@ -1,0 +1,15 @@
+{
+  "name": "silicongraph-desktop",
+  "version": "0.1.0",
+  "description": "Windows desktop application for device-aware SiliconGraph compilation",
+  "main": "electron/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron --enable-logging .",
+    "check": "node --check electron/main.js && node --check electron/adb.js && node --check electron/preload.js && node --check src/renderer.js"
+  },
+  "devDependencies": {
+    "electron": "43.1.1"
+  }
+}
