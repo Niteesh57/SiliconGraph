@@ -109,9 +109,15 @@ model.armpack  (ZIP archive, standard ZIP64)
   "tokenizer_path": "tokenizer/",
   "selector_wasm_path": "selector.wasm",
   "runtime_config_path": "runtime_config.json",
-  "memory_maps_path": "memory_maps/"
+  "memory_maps_path": "memory_maps/",
+  "device_profile_path": "device_profile.json"
 }
 ```
+
+`device_profile.json` is included when SiliconGraph compiled the package from a
+live phone probe. It records the exact device facts used for the build, such as
+CPU topology, feature flags, cache observations, memory capacity, and detected
+accelerators.
 
 ## selector.wasm
 

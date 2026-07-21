@@ -24,9 +24,65 @@ set(ARMCC_KLEIDIAI_SOURCE_DIR "" CACHE PATH
     "Optional path to a checked-out KleidiAI source tree")
 
 # ── Dependencies ───────────────────────────────────────────────────────────────
-find_package(nlohmann_json REQUIRED)
-find_package(flatbuffers   REQUIRED)
-find_package(libzip        REQUIRED)
+include(FetchContent)
+
+# Prefer packages supplied by a toolchain (for example vcpkg), but remain
+# buildable on a clean Windows workstation without an external package manager.
+find_package(nlohmann_json CONFIG QUIET)
+if(NOT nlohmann_json_FOUND)
+  FetchContent_Declare(nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG v3.12.0
+    GIT_SHALLOW TRUE
+  )
+  FetchContent_MakeAvailable(nlohmann_json)
+endif()
+
+find_package(libzip CONFIG QUIET)
+if(NOT libzip_FOUND)
+  find_package(ZLIB QUIET)
+  if(NOT ZLIB_FOUND)
+    set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(SKIP_INSTALL_ALL ON CACHE BOOL "" FORCE)
+    FetchContent_Declare(zlib
+      GIT_REPOSITORY https://github.com/madler/zlib.git
+      GIT_TAG v1.3.1
+      GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(zlib)
+    if(TARGET zlibstatic AND NOT TARGET ZLIB::ZLIB)
+      add_library(ZLIB::ZLIB ALIAS zlibstatic)
+    endif()
+    # libzip's CMake script calls FindZLIB even when the zlib target is already
+    # present in this build. Supply the in-tree target and headers explicitly.
+    set(ZLIB_LIBRARY zlibstatic CACHE FILEPATH "" FORCE)
+    set(ZLIB_LIBRARIES zlibstatic)
+    set(ZLIB_INCLUDE_DIR "${zlib_SOURCE_DIR}" CACHE PATH "" FORCE)
+    set(ZLIB_INCLUDE_DIRS "${zlib_SOURCE_DIR}")
+    set(ZLIB_FOUND TRUE)
+  endif()
+
+  set(BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+  set(BUILD_REGRESS OFF CACHE BOOL "" FORCE)
+  set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(BUILD_DOC OFF CACHE BOOL "" FORCE)
+  set(ENABLE_BZIP2 OFF CACHE BOOL "" FORCE)
+  set(ENABLE_LZMA OFF CACHE BOOL "" FORCE)
+  set(ENABLE_ZSTD OFF CACHE BOOL "" FORCE)
+  set(ENABLE_OPENSSL OFF CACHE BOOL "" FORCE)
+  set(ENABLE_GNUTLS OFF CACHE BOOL "" FORCE)
+  set(ENABLE_MBEDTLS OFF CACHE BOOL "" FORCE)
+  set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+  FetchContent_Declare(libzip
+    GIT_REPOSITORY https://github.com/nih-at/libzip.git
+    GIT_TAG v1.11.4
+    GIT_SHALLOW TRUE
+  )
+  FetchContent_MakeAvailable(libzip)
+  if(TARGET zip AND NOT TARGET libzip::zip)
+    add_library(libzip::zip ALIAS zip)
+  endif()
+endif()
 
 if(ARMCC_ENABLE_MLIR)
   find_package(MLIR REQUIRED CONFIG)

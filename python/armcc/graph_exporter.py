@@ -25,6 +25,10 @@ from .model_loader import LoadedModel
 logger = logging.getLogger("armcc.graph_exporter")
 
 
+class GraphExportError(RuntimeError):
+    """Raised when an exact runnable graph cannot be extracted."""
+
+
 @dataclass
 class ExportedGraph:
     """Serializable graph description ready for the C++ compiler."""
@@ -110,6 +114,9 @@ def _dtype_to_str(dtype: torch.dtype) -> str:
         torch.float32: "f32",
         torch.float16: "f16",
         torch.bfloat16: "bf16",
+        # ARM-IR currently represents token IDs as i32. Hugging Face models
+        # expose them as torch.long, but their vocabularies fit safely in i32.
+        torch.int64:  "i32",
         torch.int32:  "i32",
         torch.int16:  "i16",
         torch.int8:   "i8",
@@ -180,7 +187,11 @@ class GraphExporter:
         if exported_program is not None:
             self._convertExportedProgram(exported_program, graph, loaded)
         else:
-            self._convertFallback(loaded, example_inputs, graph)
+            raise GraphExportError(
+                "Unable to export an exact computation graph. No package was created "
+                "because a placeholder graph is not runnable. The export log above "
+                "contains the model-specific failure."
+            )
 
         # Save weights to disk for C++ compiler
         weight_path = self._saveWeights(loaded)
@@ -233,7 +244,15 @@ class GraphExporter:
             (batch_size, context_length),
             dtype=torch.long,
         )
-        return {"input_ids": token_ids}
+        # Generation caches are runtime state, not part of a static graph. They
+        # make torch.export emit DynamicCache objects that cannot be serialized.
+        # The target runtime manages its own KV cache during generation.
+        return {
+            "input_ids": token_ids,
+            "attention_mask": torch.ones_like(token_ids),
+            "use_cache": False,
+            "return_dict": False,
+        }
 
     def _convertExportedProgram(self, ep, graph: ExportedGraph,
                                  loaded: LoadedModel) -> None:
@@ -251,10 +270,16 @@ class GraphExporter:
             if node.op == "placeholder":
                 tid = next_id()
                 node_map[node.name] = tid
-                shape = list(node.meta.get("tensor_meta", {}).get("shape", []))
-                dtype = _dtype_to_str(
-                    node.meta.get("tensor_meta", {}).get("dtype", torch.float32)
-                )
+                # torch.export stores TensorMetadata as an object, whereas
+                # some FX paths use a dict. Support both representations.
+                tensor_meta = node.meta.get("tensor_meta")
+                if isinstance(tensor_meta, dict):
+                    shape = list(tensor_meta.get("shape", []))
+                    meta_dtype = tensor_meta.get("dtype", torch.float32)
+                else:
+                    shape = list(getattr(tensor_meta, "shape", []))
+                    meta_dtype = getattr(tensor_meta, "dtype", torch.float32)
+                dtype = _dtype_to_str(meta_dtype)
                 graph.tensors.append({
                     "id": tid, "name": node.name,
                     "dtype": dtype, "shape": shape,
@@ -273,10 +298,15 @@ class GraphExporter:
 
             elif node.op == "call_function":
                 # Map torch op → ARM-IR op
-                op_name = str(node.target).split(".")[-1]
-                full_name = f"aten.{op_name}"
-                arm_op = _TORCH_OP_MAP.get(full_name,
-                          _TORCH_OP_MAP.get(str(node.target), "Unknown"))
+                target_name = str(node.target)
+                # torch.export includes overload suffixes such as
+                # ``aten.linear.default``. ARM-IR maps operator families, not
+                # individual overloads, so remove only the final overload name.
+                canonical_name = target_name.rsplit(".", 1)[0]
+                arm_op = _TORCH_OP_MAP.get(
+                    target_name,
+                    _TORCH_OP_MAP.get(canonical_name, "Unknown"),
+                )
 
                 out_tid = next_id()
                 node_map[node.name] = out_tid
@@ -311,26 +341,6 @@ class GraphExporter:
                 for arg in node.args[0] if isinstance(node.args[0], (list, tuple)) else [node.args[0]]:
                     if hasattr(arg, "name") and arg.name in node_map:
                         graph.output_ids.append(node_map[arg.name])
-
-    def _convertFallback(self, loaded: LoadedModel,
-                          example_inputs: dict,
-                          graph: ExportedGraph) -> None:
-        """Fallback: build a skeletal graph from model config when export fails."""
-        logger.warning("  Building skeletal graph from model config (no tracing)")
-
-        # Add a single placeholder input and output
-        graph.input_ids  = [1]
-        graph.output_ids = [2]
-        graph.tensors = [
-            {"id": 1, "name": "input_ids",   "dtype": "i32",
-             "shape": [1, 512], "is_weight": False, "is_input": True},
-            {"id": 2, "name": "logits",       "dtype": "f16",
-             "shape": [1, 512, loaded.vocab_size], "is_weight": False, "is_input": False},
-        ]
-        graph.nodes = [
-            {"id": 1, "name": "forward", "op": "GEMM",
-             "inputs": [1], "outputs": [2], "attrs": {}},
-        ]
 
     def _saveWeights(self, loaded: LoadedModel) -> Path:
         """Save model weights as a flat binary file (F16 safetensors-style)."""

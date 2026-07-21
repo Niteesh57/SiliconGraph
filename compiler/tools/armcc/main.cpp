@@ -220,8 +220,10 @@ static int cmdCompile(int argc, char** argv) {
   std::string quant_str   = argValue(argc, argv, "--quant", "int8");
   std::string contexts_csv = argValue(argc, argv, "--context-lengths");
   std::string calib_json  = argValue(argc, argv, "--calibration");
+  std::string device_profile_path = argValue(argc, argv, "--device-profile");
   std::string tokenizer_dir = argValue(argc, argv, "--tokenizer-dir");
   std::string runtime_config_path = argValue(argc, argv, "--runtime-config");
+  std::string weights_path = argValue(argc, argv, "--weights");
   std::string output_path = argValue(argc, argv, "--output", "model.armpack");
   bool        verbose     = argFlag(argc, argv, "--verbose");
 
@@ -245,13 +247,25 @@ static int cmdCompile(int argc, char** argv) {
   // ── Load device profiles ────────────────────────────────────────────────
   armcc::analysis::CostModel cost_model;
   std::string profiles_dir = "device_profiles";
-  if (fs::exists(profiles_dir)) {
+  if (device_profile_path.empty() && fs::exists(profiles_dir)) {
     cost_model.loadProfileDirectory(profiles_dir);
     std::cout << "[armcc] Loaded " << cost_model.numProfiles()
               << " device profiles\n";
-  } else {
+  } else if (device_profile_path.empty()) {
     std::cout << "[armcc] WARNING: device_profiles/ not found — "
                  "using analytical cost estimates\n";
+  }
+  if (!device_profile_path.empty()) {
+    if (!fs::is_regular_file(device_profile_path)) {
+      std::cerr << "[armcc] ERROR: Cannot open device profile: "
+                << device_profile_path << "\n";
+      return 1;
+    }
+    // A live profile is the sole source of target hardware data; built-in
+    // profiles are deliberately not loaded for this compilation.
+    cost_model.loadProfile(device_profile_path);
+    std::cout << "[armcc] Loaded live device profile: "
+              << device_profile_path << "\n";
   }
 
   // ── Graph analysis ──────────────────────────────────────────────────────
@@ -279,7 +293,7 @@ static int cmdCompile(int argc, char** argv) {
   }
 
   // Quantization dtypes
-  armcc::ir::DType main_quant = armcc::ir::DType::INT8;
+  armcc::ir::DType main_quant = armcc::ir::DType::I8;
   if      (quant_str == "fp32")  main_quant = armcc::ir::DType::F32;
   else if (quant_str == "fp16")  main_quant = armcc::ir::DType::F16;
   else if (quant_str == "int8")  main_quant = armcc::ir::DType::I8;
@@ -339,6 +353,8 @@ static int cmdCompile(int argc, char** argv) {
   pkg_opts.output_path = output_path;
   pkg_opts.overwrite   = true;
   pkg_opts.tokenizer_dir = tokenizer_dir;
+  pkg_opts.weights_path = weights_path;
+  pkg_opts.device_profile_path = device_profile_path;
 
   armcc::pkg::RuntimeConfig rt_cfg;
   std::string runtime_config_error;
@@ -409,8 +425,8 @@ int main(int argc, char** argv) {
     std::cerr << "ARM AI Compiler v0.1.0\n\n"
               << "Usage:\n"
               << "  armcc compile  --graph <json> --targets <csv> --quant <dtype>\n"
-              << "                 --context-lengths <csv> --tokenizer-dir <dir>\n"
-              << "                 --runtime-config <json> --output <pack>\n"
+              << "                 --context-lengths <csv> --tokenizer-dir <dir> --weights <bin>\n"
+              << "                 --runtime-config <json> --device-profile <json> --output <pack>\n"
               << "  armcc inspect  <model.armpack>\n"
               << "  armcc ir-dump  <exported_graph.json>\n"
               << "\nRun 'armcc <command> --help' for more details.\n";

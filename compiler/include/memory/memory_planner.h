@@ -79,6 +79,8 @@ struct KVCacheLayout {
   // Flat layout: [layer][head][seq][dim] packed as a 4D tensor
   std::vector<uint64_t> layer_offsets_key;  // per-layer byte offsets
   std::vector<uint64_t> layer_offsets_val;
+
+  std::string toJSON() const;
 };
 
 // ---------------------------------------------------------------------------

@@ -8,8 +8,19 @@
 #include <fstream>
 #include <stdexcept>
 
+namespace {
+constexpr const char* kGraphMagic = "ARMGRAPH_V1\n";
+}
+
 namespace armcc {
 namespace ir {
+
+const Attribute* IRNode::attr(const std::string& name) const {
+  auto it = std::find_if(attrs.begin(), attrs.end(), [&name](const Attribute& a) {
+    return a.name == name;
+  });
+  return it == attrs.end() ? nullptr : &*it;
+}
 
 // ---------------------------------------------------------------------------
 // ModelFamily helpers
@@ -175,6 +186,54 @@ bool IRGraph::isDynamic() const {
     if (t->shape.isDynamic()) return true;
   }
   return false;
+}
+
+void IRGraph::forEachNodeMutable(const std::function<bool(IRNode&)>& fn) {
+  for (auto it = nodes.begin(); it != nodes.end();) {
+    if (fn(**it)) {
+      ++it;
+      continue;
+    }
+    nodeById.erase((*it)->id);
+    it = nodes.erase(it);
+  }
+  sortTopological();
+}
+
+std::unique_ptr<IRGraph> IRGraph::clone() const {
+  auto copy = std::make_unique<IRGraph>();
+  copy->name = name;
+  copy->model_id = model_id;
+  copy->model_family = model_family;
+  copy->source_framework = source_framework;
+  copy->num_layers = num_layers;
+  copy->hidden_size = hidden_size;
+  copy->num_heads = num_heads;
+  copy->num_kv_heads = num_kv_heads;
+  copy->intermediate_sz = intermediate_sz;
+  copy->vocab_size = vocab_size;
+  copy->max_position_embeddings = max_position_embeddings;
+  copy->kv_cache = kv_cache;
+  copy->weight_bytes = weight_bytes;
+  copy->activation_bytes = activation_bytes;
+  copy->kv_cache_bytes = kv_cache_bytes;
+  copy->applied_passes = applied_passes;
+  copy->inputIds = inputIds;
+  copy->outputIds = outputIds;
+
+  for (const auto& tensor : tensors) {
+    copy->addTensor(std::make_unique<IRTensor>(*tensor));
+  }
+  for (const auto& node : nodes) {
+    copy->addNode(std::make_unique<IRNode>(*node));
+  }
+  copy->sortTopological();
+  return copy;
+}
+
+std::vector<uint8_t> IRGraph::serialize() const {
+  const std::string text = std::string(kGraphMagic) + dump();
+  return std::vector<uint8_t>(text.begin(), text.end());
 }
 
 // ---------------------------------------------------------------------------

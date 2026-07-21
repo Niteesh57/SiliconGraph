@@ -79,5 +79,9 @@ private:
               const RuntimeDeviceState& state) const;
 };
 
+// Build portable selector source for a compiled graph family. The generated
+// source is stored in the package alongside the selector index.
+std::string generateSelectorC(const std::vector<CompiledGraph>& family);
+
 } // namespace generator
 } // namespace armcc

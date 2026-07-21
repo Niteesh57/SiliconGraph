@@ -147,7 +147,7 @@ struct CostModelResult {
 // Usage:
 //   CostModel cm;
 //   cm.loadProfile("device_profiles/snapdragon_8_gen3.json");
-//   auto result = cm.query(dev, {OpCode::MatMul, DType::INT8, ..., M, K, N});
+//   auto result = cm.query(dev, {OpCode::MatMul, DType::I8, ..., M, K, N});
 // ---------------------------------------------------------------------------
 class CostModel {
 public:

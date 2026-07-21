@@ -16,6 +16,16 @@ from .model_loader import LoadedModel
 logger = logging.getLogger("armcc.hf_metadata")
 
 
+def _token_id_list(value, default: int) -> list[int]:
+    """Normalize Transformers' scalar-or-list special-token values."""
+    if isinstance(value, (list, tuple, set)):
+        token_ids = [int(token_id) for token_id in value if token_id is not None]
+        return token_ids or [default]
+    if value is None:
+        return [default]
+    return [int(value)]
+
+
 class HFMetadataExtractor:
     """Extracts and saves all metadata needed for the .armpack tokenizer/ dir."""
 
@@ -41,6 +51,7 @@ class HFMetadataExtractor:
         # Build runtime config
         config = loaded.config
         gen_config = getattr(config, "generation_config", None)
+        eos_token_ids = _token_id_list(getattr(config, "eos_token_id", None), 2)
 
         runtime_config = {
             "temperature":         1.0,
@@ -49,9 +60,11 @@ class HFMetadataExtractor:
             "repetition_penalty":  1.0,
             "max_new_tokens":      512,
             "min_new_tokens":      0,
-            "bos_token_id":        int(getattr(config, "bos_token_id", 1) or 1),
-            "eos_token_id":        int(getattr(config, "eos_token_id", 2) or 2),
-            "pad_token_id":        int(getattr(config, "pad_token_id", 0) or 0),
+            "bos_token_id":        _token_id_list(getattr(config, "bos_token_id", None), 1)[0],
+            # eos_token_id remains the backward-compatible primary stop token.
+            "eos_token_id":        eos_token_ids[0],
+            "eos_token_ids":       eos_token_ids,
+            "pad_token_id":        _token_id_list(getattr(config, "pad_token_id", None), 0)[0],
             "chat_template":       getattr(loaded.tokenizer, "chat_template", "") or "",
         }
 

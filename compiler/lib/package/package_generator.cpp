@@ -6,7 +6,7 @@
 //   memory_maps/, runtime_config.json, selector.wasm
 // ============================================================================
 #include "package/package_generator.h"
-#include "generator/condition_matrix.h"
+#include "generator/graph_selector.h"
 #include <zip.h>
 #include <nlohmann/json.hpp>
 #include <fstream>
@@ -75,6 +75,23 @@ static bool zipAddFile(zip_t* za, const std::string& entryName,
   return zipAddString(za, entryName, data);
 }
 
+static bool zipAddFileFromDisk(zip_t* za, const std::string& entryName,
+                               const std::string& filePath,
+                               bool store_uncompressed = false) {
+  zip_source_t* src = zip_source_file(za, filePath.c_str(), 0, 0);
+  if (!src) return false;
+  zip_int64_t index = zip_file_add(
+      za, entryName.c_str(), src, ZIP_FL_OVERWRITE | ZIP_FL_ENC_UTF_8);
+  if (index < 0) {
+    zip_source_free(src);
+    return false;
+  }
+  if (store_uncompressed && zip_set_file_compression(za, index, ZIP_CM_STORE, 0) < 0) {
+    return false;
+  }
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // Constructor
 // ---------------------------------------------------------------------------
@@ -125,6 +142,9 @@ bool PackageGenerator::generate(
   manifest.num_kv_heads     = source_graph.num_kv_heads;
   manifest.vocab_size       = source_graph.vocab_size;
   manifest.max_position_embeddings = source_graph.max_position_embeddings;
+  if (!opts_.device_profile_path.empty()) {
+    manifest.device_profile_path = "device_profile.json";
+  }
 
   int progress = 0;
   auto report = [&](const std::string& step) {
@@ -138,7 +158,7 @@ bool PackageGenerator::generate(
   if (!writeGraphs(za, graph_family, manifest)) goto fail;
 
   // 2. Write weights
-  report("Writing quantized weights ...");
+  report("Writing model weights ...");
   if (!writeWeights(za, source_graph, mem_plan, manifest)) goto fail;
 
   // 3. Write kernels (stubs in Phase 1)
@@ -149,19 +169,23 @@ bool PackageGenerator::generate(
   report("Writing tokenizer assets ...");
   if (!writeTokenizer(za, manifest)) goto fail;
 
-  // 5. Write runtime config
+  // 5. Write the exact live device profile used during compilation.
+  report("Writing device profile ...");
+  if (!writeDeviceProfile(za)) goto fail;
+
+  // 6. Write runtime config
   report("Writing runtime config ...");
   if (!writeRuntimeConfig(za, runtime_cfg)) goto fail;
 
-  // 6. Write memory maps
+  // 7. Write memory maps
   report("Writing memory maps ...");
   if (!writeMemoryMaps(za, mem_plan)) goto fail;
 
-  // 7. Build and write selector (selector.wasm stub + selector JSON)
+  // 8. Build and write selector (selector.wasm stub + selector JSON)
   report("Writing graph selector ...");
   if (!writeSelectorWasm(za, graph_family)) goto fail;
 
-  // 8. Write manifest (last — references everything above)
+  // 9. Write manifest (last — references everything above)
   report("Writing manifest.json ...");
   if (!writeManifest(za, manifest)) goto fail;
 
@@ -233,6 +257,30 @@ bool PackageGenerator::writeWeights(void* za,
     const memory::MemoryPlan& plan,
     PackageManifest& manifest)
 {
+  if (!opts_.weights_path.empty()) {
+    if (!fs::is_regular_file(opts_.weights_path)) {
+      lastError_ = "Cannot read exported weights: " + opts_.weights_path;
+      return false;
+    }
+
+    const std::string weightPath = "weights/weights_f16.bin";
+    WeightEntry we;
+    we.id             = "weights_f16";
+    we.path           = weightPath;
+    we.dtype          = "f16";
+    we.size_bytes     = fs::file_size(opts_.weights_path);
+    we.mmap_safe      = true;
+    we.page_alignment = 4096;
+    manifest.weights.push_back(we);
+
+    if (!zipAddFileFromDisk((zip_t*)za, weightPath, opts_.weights_path,
+                            true /* retain an mmap-friendly byte stream */)) {
+      lastError_ = "Cannot package exported weights";
+      return false;
+    }
+    return true;
+  }
+
   // Collect weight tensors and write a flat binary blob
   std::vector<uint8_t> weight_blob;
   weight_blob.reserve(graph.weight_bytes > 0 ? graph.weight_bytes : 1024);
@@ -343,6 +391,22 @@ bool PackageGenerator::writeTokenizer(void* za, PackageManifest& manifest) {
   std::string tok_stub = R"({"version":"placeholder","model_type":"bpe"})";
   zipAddString((zip_t*)za, "tokenizer/tokenizer.json", tok_stub);
   manifest.tokenizer_path = "tokenizer/";
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// writeDeviceProfile
+// ---------------------------------------------------------------------------
+bool PackageGenerator::writeDeviceProfile(void* za) {
+  if (opts_.device_profile_path.empty()) return true;
+  if (!fs::is_regular_file(opts_.device_profile_path)) {
+    lastError_ = "Cannot read device profile: " + opts_.device_profile_path;
+    return false;
+  }
+  if (!zipAddFile((zip_t*)za, "device_profile.json", opts_.device_profile_path)) {
+    lastError_ = "Cannot package device profile";
+    return false;
+  }
   return true;
 }
 
@@ -560,6 +624,7 @@ std::string PackageManifest::toJSON(bool pretty) const {
   j["selector_wasm_path"] = selector_wasm_path;
   j["runtime_config_path"] = runtime_config_path;
   j["memory_maps_path"]  = memory_maps_path;
+  if (!device_profile_path.empty()) j["device_profile_path"] = device_profile_path;
 
   return pretty ? j.dump(2) : j.dump();
 }
@@ -593,6 +658,9 @@ std::string RuntimeConfig::toJSON(bool pretty) const {
   j["min_new_tokens"]     = min_new_tokens;
   j["bos_token_id"]       = bos_token_id;
   j["eos_token_id"]       = eos_token_id;
+  j["eos_token_ids"]      = eos_token_ids.empty()
+    ? std::vector<int32_t>{eos_token_id}
+    : eos_token_ids;
   j["pad_token_id"]       = pad_token_id;
   j["chat_template"]      = chat_template;
   return pretty ? j.dump(2) : j.dump();
@@ -609,7 +677,15 @@ RuntimeConfig RuntimeConfig::fromJSON(const std::string& s) {
     cfg.max_new_tokens     = j.value("max_new_tokens", 512);
     cfg.min_new_tokens     = j.value("min_new_tokens", 0);
     cfg.bos_token_id       = j.value("bos_token_id", 1);
-    cfg.eos_token_id       = j.value("eos_token_id", 2);
+    if (j.contains("eos_token_ids") && j["eos_token_ids"].is_array()) {
+      cfg.eos_token_ids = j["eos_token_ids"].get<std::vector<int32_t>>();
+    } else if (j.contains("eos_token_id") && j["eos_token_id"].is_array()) {
+      cfg.eos_token_ids = j["eos_token_id"].get<std::vector<int32_t>>();
+    }
+    if (cfg.eos_token_ids.empty()) {
+      cfg.eos_token_ids = {j.value("eos_token_id", 2)};
+    }
+    cfg.eos_token_id       = cfg.eos_token_ids.front();
     cfg.pad_token_id       = j.value("pad_token_id", 0);
     cfg.chat_template      = j.value("chat_template", std::string(""));
   } catch (...) {}

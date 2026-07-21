@@ -47,7 +47,7 @@ struct PassOptions {
   const analysis::DeviceProfile* device = nullptr;
 
   // Quantization settings
-  ir::DType  default_quant_dtype  = ir::DType::INT8;
+  ir::DType  default_quant_dtype  = ir::DType::I8;
   int32_t    quant_group_size     = 128;    // For INT4 grouped quantization
   float      quant_error_threshold = 0.01f; // Sensitivity threshold
 
@@ -94,7 +94,7 @@ protected:
 // Usage:
 //   PassManager pm;
 //   pm.addGraphPasses();
-//   pm.addQuantPasses(DType::INT8);
+//   pm.addQuantPasses(DType::I8);
 //   pm.addLoweringPasses(deviceProfile);
 //   auto results = pm.run(graph, opts);
 // ---------------------------------------------------------------------------

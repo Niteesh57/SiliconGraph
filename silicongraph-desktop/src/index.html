@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SiliconGraph Device Compiler</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">SG</div>
+        <div>
+          <p class="eyebrow">DEVICE-AWARE AI COMPILER</p>
+          <h1>SiliconGraph</h1>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <button class="hub-setup-button" id="hub-setup-button" type="button" title="Hugging Face setup" aria-label="Open Hugging Face setup">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.2 5.2A7.8 7.8 0 1 1 4.3 16.4M7.5 2.8v4.8H2.7M8.5 14.5c.8 1 1.9 1.5 3.5 1.5s2.7-.5 3.5-1.5M9 10.5h.01M15 10.5h.01"/></svg>
+          <span>Hugging Face setup</span>
+        </button>
+        <div class="connection-state" id="connection-state">
+          <span class="status-dot"></span>
+          <span>Waiting for Android device</span>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div>
+          <p class="eyebrow accent">COMPILE FOR THE PHONE IN FRONT OF YOU</p>
+          <h2>Profile the device. Optimize the model. Package a safe runtime.</h2>
+          <p class="muted">Connect an Android device through USB with ADB enabled. SiliconGraph reads the connected phone's available hardware facts and compiles specifically for that device.</p>
+        </div>
+        <button class="button secondary" id="scan-button">Scan connected devices</button>
+      </section>
+
+      <section class="workspace-grid">
+        <aside class="panel devices-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">STEP 1</p>
+              <h3>Connected devices</h3>
+            </div>
+            <span class="count" id="device-count">0</span>
+          </div>
+          <p class="panel-copy">USB devices are discovered through Android Platform Tools (<code>adb</code>).</p>
+          <div class="device-list" id="device-list">
+            <div class="empty-state">Scan to detect a USB-connected Android device.</div>
+          </div>
+          <p class="hint" id="device-help">Enable Developer options, USB debugging, then authorize this PC on the phone.</p>
+        </aside>
+
+        <section class="panel device-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">STEP 2</p>
+              <h3>Connected device profile</h3>
+            </div>
+            <span class="pill" id="profile-status">No device selected</span>
+          </div>
+          <div class="device-summary empty-state" id="device-summary">Select a detected device to inspect its Android, CPU, memory, and SoC information.</div>
+          <div class="profile-select-wrap">
+            <p class="field-label">Target device</p>
+            <div class="locked-target" id="target-device-name">Select a connected Android device</div>
+            <p class="hint">There is no target-profile selector. The selected USB device is always the compilation target, using a fresh live Android probe.</p>
+          </div>
+          <div class="profile-details" id="profile-details"></div>
+        </section>
+
+        <section class="panel compile-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">STEP 3</p>
+              <h3>Build an optimized package</h3>
+            </div>
+          </div>
+          <form id="compile-form">
+            <label for="model-input">Model</label>
+            <input id="model-input" required placeholder="HuggingFaceTB/SmolLM2-135M-Instruct, its Hugging Face URL, or C:\models\my-model" />
+            <div class="form-grid">
+              <div>
+                <label for="quantization-select">Precision policy</label>
+                <select id="quantization-select">
+                  <option value="int8">INT8 - reliable CPU baseline</option>
+                  <option value="int4">INT4 - lower memory target</option>
+                  <option value="mixed" selected>Mixed - INT8 + INT4 graph family</option>
+                  <option value="fp16">FP16 - reference quality</option>
+                  <option value="fp32">FP32 - diagnostic only</option>
+                  <option value="fp8">FP8 - experimental</option>
+                </select>
+              </div>
+              <div>
+                <label for="context-input">Context buckets</label>
+                <input id="context-input" value="512,2048" inputmode="numeric" />
+              </div>
+            </div>
+            <label for="output-input">Output directory <span class="optional">(optional)</span></label>
+            <input id="output-input" placeholder="Defaults to <project>\output" />
+            <button class="button primary" id="compile-button" type="submit" disabled>Compile for selected device</button>
+          </form>
+          <p class="hint">The package stores the selected device's generated live profile and requested context buckets. Compilation needs Python dependencies and the native <code>armcc-compiler</code> binary.</p>
+        </section>
+      </section>
+
+      <section class="panel console-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">COMPILATION LOG</p>
+            <h3>Build activity</h3>
+          </div>
+          <span class="pill" id="job-status">Idle</span>
+        </div>
+        <pre id="compile-log">Select a phone, specify a model, then start compilation.</pre>
+      </section>
+    </main>
+
+    <div class="modal-backdrop" id="hub-modal" hidden>
+      <section class="hub-modal panel" role="dialog" aria-modal="true" aria-labelledby="hub-modal-title">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow accent">MODEL LIBRARY</p>
+            <h3 id="hub-modal-title">Hugging Face setup</h3>
+          </div>
+          <button class="icon-button" id="hub-close-button" type="button" aria-label="Close Hugging Face setup">×</button>
+        </div>
+        <p class="panel-copy">Connect a read token for gated or private models, browse models on the Hub, and manage models already available on this computer.</p>
+
+        <section class="hub-section">
+          <div class="section-title"><h4>Access token</h4><span class="pill" id="hub-token-status">Not configured</span></div>
+          <div class="token-row">
+            <input id="hub-token-input" type="password" autocomplete="off" placeholder="hf_… (read access token)" />
+            <button class="button secondary compact" id="hub-save-token" type="button">Save token</button>
+            <button class="button subtle compact" id="hub-clear-token" type="button">Remove</button>
+          </div>
+          <p class="hint" id="hub-token-help">The token stays out of the web UI and is encrypted using your Windows account.</p>
+        </section>
+
+        <section class="hub-section">
+          <div class="section-title"><h4>Find models</h4><span class="hint">Search the Hugging Face Hub</span></div>
+          <div class="search-row">
+            <input id="hub-search-input" type="search" placeholder="Search models, e.g. Qwen 0.5B" />
+            <button class="button primary compact" id="hub-search-button" type="button">Search</button>
+          </div>
+          <div class="hub-results" id="hub-results"><div class="empty-state">Search for a model to view downloadable repositories.</div></div>
+        </section>
+
+        <section class="hub-section local-models-section">
+          <div class="section-title"><h4>Available locally</h4><button class="text-button" id="hub-refresh-local" type="button">Refresh</button></div>
+          <p class="hint" id="hub-local-path"></p>
+          <div class="local-models" id="hub-local-models"><div class="empty-state">Loading local models…</div></div>
+        </section>
+
+        <div class="download-status" id="hub-download-status" hidden>
+          <div class="download-heading"><strong id="hub-download-title">Preparing download</strong><button class="text-button danger-text" id="hub-cancel-download" type="button">Cancel</button></div>
+          <div class="progress-track"><div class="progress-bar" id="hub-download-bar"></div></div>
+          <p class="hint" id="hub-download-detail"></p>
+        </div>
+      </section>
+    </div>
+    <script src="renderer.js"></script>
+  </body>
+</html>

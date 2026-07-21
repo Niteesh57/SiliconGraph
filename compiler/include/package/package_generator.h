@@ -31,6 +31,14 @@ struct PackageGeneratorOptions {
   // Tokenizer directory (if present, gets copied into package)
   std::string tokenizer_dir;
 
+  // Flat model-weight file emitted by the Python exporter. It is added to the
+  // archive directly from disk so multi-gigabyte models are never duplicated
+  // in the compiler process memory.
+  std::string weights_path;
+
+  // Live device profile used to compile this package, if one was supplied.
+  std::string device_profile_path;
+
   // Overwrite existing file?
   bool        overwrite        = true;
 };
@@ -75,6 +83,7 @@ private:
                     PackageManifest& manifest);
   bool writeKernels(void* zip, PackageManifest& manifest);
   bool writeTokenizer(void* zip, PackageManifest& manifest);
+  bool writeDeviceProfile(void* zip);
   bool writeRuntimeConfig(void* zip, const RuntimeConfig& cfg);
   bool writeMemoryMaps(void* zip, const memory::MemoryPlan& plan);
   bool writeSelectorWasm(void* zip,

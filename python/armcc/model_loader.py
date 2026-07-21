@@ -19,6 +19,7 @@ from transformers import (
     PreTrainedModel,
     PretrainedConfig,
 )
+from armcc.model_reference import normalize_model_reference
 
 logger = logging.getLogger("armcc.model_loader")
 
@@ -92,6 +93,7 @@ class ModelLoader:
         Returns:
             LoadedModel with the model, config, tokenizer, and metadata.
         """
+        model_id = normalize_model_reference(model_id)
         logger.info(f"Loading model: {model_id}")
 
         # --- Load config first (fast, no weights) ---

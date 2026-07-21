@@ -3,6 +3,9 @@
 // ============================================================================
 #include "arm_ir/ops.h"
 
+#include <utility>
+
+
 namespace armcc {
 namespace ir {
 
@@ -130,6 +133,42 @@ const char* opCodeToString(OpCode op) {
     case OpCode::Return:                return "Return";
     default:                            return "Unknown";
   }
+}
+
+OpCode opCodeFromString(const std::string& s) {
+  static constexpr std::pair<const char*, OpCode> kOps[] = {
+    {"Constant", OpCode::Constant}, {"Input", OpCode::Input}, {"Output", OpCode::Output},
+    {"MatMul", OpCode::MatMul}, {"BatchMatMul", OpCode::BatchMatMul}, {"GEMM", OpCode::GEMM},
+    {"Conv1D", OpCode::Conv1D}, {"Conv2D", OpCode::Conv2D}, {"DepthwiseConv2D", OpCode::DepthwiseConv2D},
+    {"GroupedConv2D", OpCode::GroupedConv2D}, {"Deconv2D", OpCode::Deconv2D},
+    {"MultiHeadAttention", OpCode::MultiHeadAttention}, {"FlashAttention", OpCode::FlashAttention},
+    {"GroupQueryAttention", OpCode::GroupQueryAttention}, {"SlidingWindowAttention", OpCode::SlidingWindowAttention},
+    {"KVCacheRead", OpCode::KVCacheRead}, {"KVCacheWrite", OpCode::KVCacheWrite}, {"RopeEmbedding", OpCode::RopeEmbedding},
+    {"LayerNorm", OpCode::LayerNorm}, {"RMSNorm", OpCode::RMSNorm},
+    {"ReLU", OpCode::ReLU}, {"GeLU", OpCode::GeLU}, {"SiLU", OpCode::SiLU}, {"Sigmoid", OpCode::Sigmoid},
+    {"Tanh", OpCode::Tanh}, {"Softmax", OpCode::Softmax},
+    {"Add", OpCode::Add}, {"Sub", OpCode::Sub}, {"Mul", OpCode::Mul}, {"Div", OpCode::Div},
+    {"Pow", OpCode::Pow}, {"Maximum", OpCode::Maximum}, {"Minimum", OpCode::Minimum},
+    {"Neg", OpCode::Neg}, {"Abs", OpCode::Abs}, {"Sqrt", OpCode::Sqrt}, {"Rsqrt", OpCode::Rsqrt},
+    {"Exp", OpCode::Exp}, {"Log", OpCode::Log},
+    {"ReduceSum", OpCode::ReduceSum}, {"ReduceMean", OpCode::ReduceMean}, {"ReduceMax", OpCode::ReduceMax},
+    {"ReduceMin", OpCode::ReduceMin}, {"ArgMax", OpCode::ArgMax}, {"ArgMin", OpCode::ArgMin},
+    {"Reshape", OpCode::Reshape}, {"Flatten", OpCode::Flatten}, {"Squeeze", OpCode::Squeeze},
+    {"Unsqueeze", OpCode::Unsqueeze}, {"Transpose", OpCode::Transpose}, {"Permute", OpCode::Permute},
+    {"Slice", OpCode::Slice}, {"Gather", OpCode::Gather}, {"Concat", OpCode::Concat}, {"Split", OpCode::Split},
+    {"Cast", OpCode::Cast}, {"Quantize", OpCode::Quantize}, {"Dequantize", OpCode::Dequantize},
+    {"MaxPool2D", OpCode::MaxPool2D}, {"AvgPool2D", OpCode::AvgPool2D},
+    {"Embedding", OpCode::Embedding}, {"EmbeddingBag", OpCode::EmbeddingBag},
+    {"FFN_SwiGLU", OpCode::FFN_SwiGLU}, {"FFN_GeLU", OpCode::FFN_GeLU},
+    {"RMSNorm_Scale", OpCode::RMSNorm_Scale}, {"Attention_Masked", OpCode::Attention_Masked},
+    {"HW_Boundary", OpCode::HW_Boundary}, {"DMA_Prefetch", OpCode::DMA_Prefetch},
+    {"NPU_SubgraphBegin", OpCode::NPU_SubgraphBegin}, {"NPU_SubgraphEnd", OpCode::NPU_SubgraphEnd},
+    {"If", OpCode::If}, {"Loop", OpCode::Loop}, {"Return", OpCode::Return}, {"Unknown", OpCode::Unknown}
+  };
+  for (const auto& [name, op] : kOps) {
+    if (s == name) return op;
+  }
+  return OpCode::Unknown;
 }
 
 bool opCodeIsReduction(OpCode op) {

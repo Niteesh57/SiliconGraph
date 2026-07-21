@@ -152,7 +152,9 @@ void MemoryPlanner::assignArenas(ir::IRGraph& graph,
     t->mem_offset = weight_offset;
     uint64_t sz = t->live_end == -1 ? 0 : 0; // Size computed in aliasing pass
     int64_t elems = t->shape.numElements();
-    sz = (elems > 0) ? ((uint64_t)elems * std::max(1UL, ir::dtypeElementSize(t->dtype))) : 64;
+    sz = (elems > 0)
+      ? (static_cast<uint64_t>(elems) * std::max<size_t>(1, ir::dtypeElementSize(t->dtype)))
+      : 64;
     weight_offset += sz;
   }
   graph.weight_bytes = weight_offset;

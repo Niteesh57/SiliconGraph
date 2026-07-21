@@ -55,10 +55,10 @@ void PassManager::addGraphPasses() {
 
 void PassManager::addQuantizationPasses(ir::DType dtype, bool mixed) {
   switch (dtype) {
-    case ir::DType::INT8:
+    case ir::DType::I8:
       addPass(makeINT8QuantizationPass());
       break;
-    case ir::DType::INT4:
+    case ir::DType::I4:
       addPass(makeINT4QuantizationPass(128));
       if (mixed) addPass(makeMixedPrecisionPass({}));
       break;
@@ -99,7 +99,7 @@ void PassManager::addFullPipeline(const analysis::DeviceProfile& dev,
                                   int battery_pct,
                                   ir::ThermalState thermal) {
   addGraphPasses();
-  addQuantizationPasses(quant_dtype, /*mixed=*/quant_dtype == ir::DType::INT4);
+  addQuantizationPasses(quant_dtype, /*mixed=*/quant_dtype == ir::DType::I4);
   addMemoryPasses();
   addSchedulingPasses(dev, battery_pct, thermal);
   addLoweringPasses(dev);

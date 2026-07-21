@@ -129,6 +129,7 @@ struct PackageManifest {
   std::string    selector_wasm_path = "selector.wasm";
   std::string    runtime_config_path = "runtime_config.json";
   std::string    memory_maps_path  = "memory_maps/";
+  std::string    device_profile_path;
 
   // Serialization
   std::string toJSON(bool pretty = true) const;
@@ -152,6 +153,7 @@ struct RuntimeConfig {
   // Special token IDs
   int32_t  bos_token_id      = 1;
   int32_t  eos_token_id      = 2;
+  std::vector<int32_t> eos_token_ids;
   int32_t  pad_token_id      = 0;
 
   // Chat template

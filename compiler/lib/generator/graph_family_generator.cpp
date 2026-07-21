@@ -223,7 +223,7 @@ CompiledGraph GraphFamilyGenerator::compileOneGraph(
 
     // Context-length specific pass
     if (conds.context_length >= 4096) {
-      pm.addPass(makeStreamingAttentionPass(512));
+      pm.addPass(passes::makeStreamingAttentionPass(512));
     }
 
     // Quantization passes

@@ -28,6 +28,21 @@ import json
 import tempfile
 from pathlib import Path
 
+
+def _configure_console_encoding() -> None:
+    """Use UTF-8 for redirected Windows output when the stream allows it.
+
+    Electron launches Python with redirected stdout/stderr. On some Windows
+    installations Python selects CP1252 for those streams, which cannot encode
+    normal compiler status characters such as a check mark.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (AttributeError, OSError):
+            pass
+
+
 # Configure logging before any imports
 logging.basicConfig(
     format="[armcc] %(levelname)s %(name)s: %(message)s",
@@ -39,10 +54,12 @@ logger = logging.getLogger("armcc.cli")
 def _build_compile_parser(sub) -> argparse.ArgumentParser:
     p = sub.add_parser("compile", help="Compile a HuggingFace model to .armpack")
     p.add_argument("--model", "-m", required=True,
-                   help="HuggingFace model ID or local path")
+                   help="Hugging Face model ID, Hugging Face URL, or local path")
     p.add_argument("--targets", "-t", default="generic_arm64",
                    help="Comma-separated list of target profiles "
                         "(e.g. snapdragon_8_gen3,dimensity_9300,apple_a18,generic_arm64)")
+    p.add_argument("--device-profile", default=None,
+                   help="Path to a live device-profile JSON that overrides the selected target profile")
     p.add_argument("--quantization", "-q", default="int8",
                    choices=["fp32", "fp16", "int8", "int4", "fp8", "mixed"],
                    help="Quantization dtype (default: int8)")
@@ -75,6 +92,8 @@ def _buildCppCompileCommand(
     work_dir: str,
     output_path: str,
     calibration_path: str | None = None,
+    device_profile_path: str | None = None,
+    execution_policy_path: str | None = None,
     verbose: bool = False,
 ) -> list[str]:
     """Build the C++ compiler command with all generated package assets."""
@@ -87,10 +106,15 @@ def _buildCppCompileCommand(
         "--context-lengths", context_lengths,
         "--tokenizer-dir", str(work_path / "tokenizer"),
         "--runtime-config", str(work_path / "runtime_config.json"),
+        "--weights", str(work_path / "weights_f16.bin"),
         "--output", output_path,
     ]
+    if execution_policy_path:
+        cmd += ["--execution-policy", execution_policy_path]
     if calibration_path:
         cmd += ["--calibration", calibration_path]
+    if device_profile_path:
+        cmd += ["--device-profile", device_profile_path]
     if verbose:
         cmd += ["--verbose"]
     return cmd
@@ -102,11 +126,18 @@ def _cmd_compile(args) -> int:
     from armcc.graph_exporter  import GraphExporter
     from armcc.calibration     import CalibrationRunner
     from armcc.hf_metadata     import HFMetadataExtractor
+    from armcc.execution_policy import build_execution_policy, write_execution_policy
 
     import torch
+    from armcc.model_reference import normalize_model_reference
 
     if args.verbose:
         logging.getLogger("armcc").setLevel(logging.DEBUG)
+
+    model_reference = normalize_model_reference(args.model)
+    if model_reference != args.model:
+        logger.info("Normalized Hugging Face URL to model ID: %s", model_reference)
+    args.model = model_reference
 
     # Determine output path
     model_slug = args.model.split("/")[-1].lower().replace("_", "-")
@@ -142,7 +173,20 @@ def _cmd_compile(args) -> int:
     print("[2/5] Extracting tokenizer and metadata ...")
     meta = HFMetadataExtractor(work_dir)
     runtime_config = meta.extract(loaded)
+    live_profile: dict = {}
+    if args.device_profile:
+        try:
+            with open(args.device_profile, "r", encoding="utf-8") as profile_file:
+                live_profile = json.load(profile_file)
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"      x Cannot read device profile for execution policy: {exc}")
+            return 1
+    execution_policy_path = write_execution_policy(
+        Path(work_dir) / "execution_policy.json",
+        build_execution_policy(live_profile, context_lengths),
+    )
     print(f"      ✓ Tokenizer saved, runtime config generated")
+    print("      ✓ CPU/Vulkan execution policy generated (NPU disabled)")
 
     # ── Step 3: Export graph ──────────────────────────────────────────────────
     print(f"[3/5] Exporting computation graph (seq_len={context_lengths[0]}) ...")
@@ -190,6 +234,8 @@ def _cmd_compile(args) -> int:
             work_dir=work_dir,
             output_path=output_path,
             calibration_path=calib_path,
+            device_profile_path=args.device_profile,
+            execution_policy_path=execution_policy_path,
             verbose=args.verbose,
         )
 
@@ -204,7 +250,7 @@ def _cmd_compile(args) -> int:
         print(f"   {work_dir}")
         print("   Build the C++ compiler first:")
         print("   cmake -B build -G Ninja && cmake --build build")
-        return 0
+        return 2
 
     print(f"\n✓ Compiled successfully → {output_path}")
     return 0
@@ -257,20 +303,30 @@ def _cmd_inspect(args) -> int:
 def _findArmccBinary() -> str | None:
     """Find the compiled armcc C++ binary."""
     import shutil
-    # Check PATH first
-    found = shutil.which("armcc-compiler")
-    if found:
-        return found
+    # Check PATH first.
+    for executable in ("armcc-compiler", "armcc"):
+        found = shutil.which(executable)
+        if found:
+            return found
     # Check common build directories
-    for candidate in ["./build/compiler/tools/armcc/armcc",
-                       "./build/bin/armcc",
-                       "./out/armcc"]:
+    for candidate in [
+        "./build/compiler/tools/Release/armcc.exe",
+        "./build/compiler/tools/armcc.exe",
+        "./build/compiler/tools/armcc/Release/armcc.exe",
+        "./build/compiler/tools/armcc/armcc.exe",
+        "./build/bin/armcc.exe",
+        "./out/armcc.exe",
+        "./build/compiler/tools/armcc",
+        "./build/bin/armcc",
+        "./out/armcc",
+    ]:
         if os.path.isfile(candidate):
             return candidate
     return None
 
 
 def main():
+    _configure_console_encoding()
     parser = argparse.ArgumentParser(
         prog="armcc",
         description="ARM AI Compiler — Universal AI Model Optimizer for ARM",

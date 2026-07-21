@@ -35,3 +35,11 @@ Thumbs.db
 *.dll
 *.exe
 compile_commands.json
+output
+__pycache__/
+models/
+vcpkg_installed/
+node_modules/
+silicongraph-desktop/node_modules/
+silicongraph-desktop/dist/
+silicongraph-desktop/release/

@@ -36,7 +36,7 @@ enum class LatencyMode : uint8_t {
 
 struct GraphConditions {
   ir::SoCID      soc_id          = ir::SoCID::Generic_ARM64;
-  ir::DType      quant_dtype     = ir::DType::INT8;
+  ir::DType      quant_dtype     = ir::DType::I8;
   bool           mixed_precision = false;
   uint32_t       memory_mb       = 2048;    // Available RAM in MB
   uint32_t       context_length  = 2048;
@@ -81,7 +81,7 @@ struct GraphFamilySpec {
   std::vector<ir::SoCID> target_socs;
 
   // Quantization dtypes to emit (one graph per dtype per soc)
-  std::vector<ir::DType> quant_dtypes = {ir::DType::INT8, ir::DType::INT4};
+  std::vector<ir::DType> quant_dtypes = {ir::DType::I8, ir::DType::I4};
   bool include_mixed_precision         = true;
 
   // Context lengths to optimize for

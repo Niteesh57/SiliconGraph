@@ -13,6 +13,8 @@ def test_cpp_compile_command_includes_generated_package_assets(tmp_path):
         work_dir=str(tmp_path),
         output_path="C:/out/model.armpack",
         calibration_path="C:/work/calibration.json",
+        device_profile_path="C:/work/device_profile.json",
+        execution_policy_path="C:/work/execution_policy.json",
         verbose=True,
     )
 
@@ -24,7 +26,10 @@ def test_cpp_compile_command_includes_generated_package_assets(tmp_path):
         "--context-lengths", "128,512",
         "--tokenizer-dir", str(tmp_path / "tokenizer"),
         "--runtime-config", str(tmp_path / "runtime_config.json"),
+        "--weights", str(tmp_path / "weights_f16.bin"),
         "--output", "C:/out/model.armpack",
+        "--execution-policy", "C:/work/execution_policy.json",
         "--calibration", "C:/work/calibration.json",
+        "--device-profile", "C:/work/device_profile.json",
         "--verbose",
     ]

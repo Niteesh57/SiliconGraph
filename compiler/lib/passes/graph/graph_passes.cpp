@@ -10,6 +10,7 @@
 #include "arm_ir/ops.h"
 #include <cstring>
 #include <cmath>
+#include <unordered_set>
 
 namespace armcc {
 namespace passes {
@@ -123,7 +124,6 @@ public:
 
 private:
   // Need unordered_set — include it here
-  using std::unordered_set<uint32_t>;
 };
 
 // ============================================================================
