@@ -4,12 +4,8 @@
 // The most novel pass in the compiler. Instead of only fusing:
 //   MatMul + Add + ReLU → one kernel
 //
-// This pass fuses across hardware boundaries:
-//   Embedding   → DSP
-//   Attention   → NPU
-//   LayerNorm   → CPU
-//   MatMul      → GPU
-//   Softmax     → DSP
+// This pass separates portable CPU work from optional Vulkan GPU work.
+// It never creates proprietary NPU, DSP, or vendor delegate subgraphs.
 //
 // Uses the CostModel to assign each op to its optimal execution unit,
 // then inserts HW_Boundary nodes at unit transition points so the
@@ -32,8 +28,8 @@ public:
     : Pass("HardwareFusion"), dev_(dev), costModel_() {}
 
   std::string description() const override {
-    return "Assigns ops to optimal exec units (CPU/GPU/NPU/DSP) "
-           "and inserts HW_Boundary transition markers";
+    return "Assigns ops to the CPU or Vulkan execution candidate "
+           "and inserts CPU/Vulkan transition markers";
   }
 
   PassResult run(ir::IRGraph& graph, const PassOptions& opts) override {
@@ -71,6 +67,15 @@ public:
       }
 
       auto recUnit = costModel_.recommendUnit(dev_, q, battery_pct, thermal);
+      // The package format supports only open CPU and Vulkan candidates.
+      // Keep CPU for small/transfer-heavy operations; a Vulkan candidate may
+      // retain only GPU-recommended work. NPU/DSP/ANE suggestions are never
+      // materialized in the graph.
+      if (opts.execution_backend != ir::ExecUnit::GPU) {
+        recUnit = ir::ExecUnit::CPU;
+      } else if (recUnit != ir::ExecUnit::GPU) {
+        recUnit = ir::ExecUnit::CPU;
+      }
       n->assigned_unit = recUnit;
 
       // Cache cost estimates on the node
@@ -81,13 +86,9 @@ public:
       n->cost_dsp_ms  = costResult.dsp_ms;
       n->cost_ane_ms  = costResult.ane_ms;
 
-      // Mark NPU/GPU subgraph membership
-      if (recUnit == ir::ExecUnit::NPU || recUnit == ir::ExecUnit::APU) {
-        n->in_npu_subgraph = true;
-      } else if (recUnit == ir::ExecUnit::GPU) {
+      // Mark the only optional accelerator path: Vulkan GPU.
+      if (recUnit == ir::ExecUnit::GPU) {
         n->in_gpu_subgraph = true;
-      } else if (recUnit == ir::ExecUnit::DSP) {
-        n->in_dsp_subgraph = true;
       }
 
       result.changed = true;

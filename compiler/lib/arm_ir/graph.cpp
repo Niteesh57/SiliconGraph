@@ -33,6 +33,10 @@ const char* modelFamilyToString(ModelFamily f) {
     case ModelFamily::T5Style:    return "t5_style";
     case ModelFamily::MoE:        return "moe";
     case ModelFamily::VisionLM:   return "vision_lm";
+    case ModelFamily::AudioLM:    return "audio_lm";
+    case ModelFamily::AudioGeneration: return "audio_generation";
+    case ModelFamily::ImageGeneration: return "image_generation";
+    case ModelFamily::Embedding:  return "embedding";
     case ModelFamily::Custom:     return "custom";
     default:                      return "unknown";
   }

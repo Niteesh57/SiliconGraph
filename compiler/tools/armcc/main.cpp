@@ -119,13 +119,58 @@ static bool loadRuntimeConfig(const std::string& path,
   std::ostringstream contents;
   contents << f.rdbuf();
   try {
-    json::parse(contents.str());
+    const auto parsed = json::parse(contents.str());
+    (void)parsed;
     config = armcc::pkg::RuntimeConfig::fromJSON(contents.str());
   } catch (const std::exception& e) {
     error = std::string("invalid runtime config: ") + e.what();
     return false;
   }
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// Helper: load compile-time capacity tiers and the Vulkan candidate from the
+// generated live policy. Runtime free memory selects among these tiers later.
+// ---------------------------------------------------------------------------
+static bool loadExecutionPolicy(const std::string& path,
+                                bool& vulkan_enabled,
+                                std::vector<uint32_t>& memory_budgets_mb,
+                                std::string& error) {
+  vulkan_enabled = false;
+  memory_budgets_mb.clear();
+  if (path.empty()) return true;
+  std::ifstream f(path);
+  if (!f) {
+    error = "cannot open execution policy: " + path;
+    return false;
+  }
+  try {
+    json policy;
+    f >> policy;
+    vulkan_enabled = policy.value("backends", json::object())
+                         .value("vulkan", json::object())
+                         .value("enabled", false);
+    const auto capacity = policy.value("device_capacity", json::object());
+    if (capacity.contains("graph_memory_budgets_mb") &&
+        capacity["graph_memory_budgets_mb"].is_array()) {
+      for (const auto& value : capacity["graph_memory_budgets_mb"]) {
+        if (!value.is_number_unsigned()) continue;
+        const auto budget = value.get<uint64_t>();
+        if (budget > 0 && budget <= std::numeric_limits<uint32_t>::max()) {
+          memory_budgets_mb.push_back(static_cast<uint32_t>(budget));
+        }
+      }
+      std::sort(memory_budgets_mb.begin(), memory_budgets_mb.end());
+      memory_budgets_mb.erase(
+          std::unique(memory_budgets_mb.begin(), memory_budgets_mb.end()),
+          memory_budgets_mb.end());
+    }
+    return true;
+  } catch (const std::exception& e) {
+    error = std::string("invalid execution policy: ") + e.what();
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -166,6 +211,11 @@ static std::unique_ptr<armcc::ir::IRGraph> graphFromJSON(const std::string& path
   if      (family == "llama_style") graph->model_family = armcc::ir::ModelFamily::LlamaStyle;
   else if (family == "gemma_style") graph->model_family = armcc::ir::ModelFamily::GemmaStyle;
   else if (family == "gpt2_style")  graph->model_family = armcc::ir::ModelFamily::GPT2Style;
+  else if (family == "vision_lm") graph->model_family = armcc::ir::ModelFamily::VisionLM;
+  else if (family == "audio_lm") graph->model_family = armcc::ir::ModelFamily::AudioLM;
+  else if (family == "audio_generation") graph->model_family = armcc::ir::ModelFamily::AudioGeneration;
+  else if (family == "image_generation") graph->model_family = armcc::ir::ModelFamily::ImageGeneration;
+  else if (family == "embedding") graph->model_family = armcc::ir::ModelFamily::Embedding;
 
   // Tensors
   for (auto& jt : j.value("tensors", json::array())) {
@@ -221,7 +271,9 @@ static int cmdCompile(int argc, char** argv) {
   std::string contexts_csv = argValue(argc, argv, "--context-lengths");
   std::string calib_json  = argValue(argc, argv, "--calibration");
   std::string device_profile_path = argValue(argc, argv, "--device-profile");
+  std::string execution_policy_path = argValue(argc, argv, "--execution-policy");
   std::string tokenizer_dir = argValue(argc, argv, "--tokenizer-dir");
+  std::string processor_dir = argValue(argc, argv, "--processor-dir");
   std::string runtime_config_path = argValue(argc, argv, "--runtime-config");
   std::string weights_path = argValue(argc, argv, "--weights");
   std::string output_path = argValue(argc, argv, "--output", "model.armpack");
@@ -305,6 +357,31 @@ static int cmdCompile(int argc, char** argv) {
   }
   if (quant_str != "mixed") spec.quant_dtypes = {main_quant};
 
+  std::string execution_policy_error;
+  bool include_vulkan = false;
+  std::vector<uint32_t> policy_memory_budgets;
+  if (!loadExecutionPolicy(execution_policy_path, include_vulkan,
+                           policy_memory_budgets, execution_policy_error)) {
+    std::cerr << "[armcc] ERROR: " << execution_policy_error << "\n";
+    return 1;
+  }
+  if (!policy_memory_budgets.empty()) {
+    spec.memory_budgets_mb = policy_memory_budgets;
+    std::cout << "[armcc] Capacity-aware graph budgets: ";
+    for (size_t i = 0; i < spec.memory_budgets_mb.size(); ++i) {
+      if (i > 0) std::cout << ", ";
+      std::cout << spec.memory_budgets_mb[i] << "MB";
+    }
+    std::cout << "\n";
+  }
+  spec.execution_backends = {armcc::ir::ExecUnit::CPU};
+  if (include_vulkan) {
+    spec.execution_backends.push_back(armcc::ir::ExecUnit::GPU);
+    std::cout << "[armcc] Vulkan graph candidate enabled; runtime benchmark decides use\n";
+  } else {
+    std::cout << "[armcc] CPU-only graph family; Vulkan is unavailable or not enabled\n";
+  }
+
   // ── Run optimization passes for each target ─────────────────────────────
   std::cout << "[armcc] Running optimization pipeline ...\n";
   for (auto soc_id : target_socs) {
@@ -353,8 +430,11 @@ static int cmdCompile(int argc, char** argv) {
   pkg_opts.output_path = output_path;
   pkg_opts.overwrite   = true;
   pkg_opts.tokenizer_dir = tokenizer_dir;
+  pkg_opts.processor_dir = processor_dir;
   pkg_opts.weights_path = weights_path;
   pkg_opts.device_profile_path = device_profile_path;
+  pkg_opts.execution_policy_path = execution_policy_path;
+  pkg_opts.include_vulkan = include_vulkan;
 
   armcc::pkg::RuntimeConfig rt_cfg;
   std::string runtime_config_error;
@@ -426,7 +506,7 @@ int main(int argc, char** argv) {
               << "Usage:\n"
               << "  armcc compile  --graph <json> --targets <csv> --quant <dtype>\n"
               << "                 --context-lengths <csv> --tokenizer-dir <dir> --weights <bin>\n"
-              << "                 --runtime-config <json> --device-profile <json> --output <pack>\n"
+              << "                 --runtime-config <json> --device-profile <json> --execution-policy <json> --output <pack>\n"
               << "  armcc inspect  <model.armpack>\n"
               << "  armcc ir-dump  <exported_graph.json>\n"
               << "\nRun 'armcc <command> --help' for more details.\n";

@@ -82,6 +82,7 @@ test("builds a packageable profile from detected device facts", () => {
   assert.equal(profile.cpu.physical_core_count, 8);
   assert.equal(profile.cpu.adb_visible_core_count, 6);
   assert.equal(profile.cpu.num_big_cores, 1);
-  assert.equal(profile.npu.present, false);
-  assert.match(profile.detected_accelerators.npu_hardware, /Hexagon/);
+  assert.equal(profile.npu, undefined);
+  assert.deepEqual(profile.execution.allowed_backends, ["cpu", "vulkan"]);
+  assert.equal(profile.execution.vulkan_selection, "requires_end_to_end_benchmark_win");
 });

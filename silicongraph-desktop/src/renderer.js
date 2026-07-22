@@ -184,7 +184,6 @@ function profileFacts(profile) {
   if (!profile) return "";
   const cpu = profile.cpu || {};
   const gpu = profile.gpu || {};
-  const accelerators = profile.detected_accelerators || {};
   const clusters = (cpu.clusters || [])
     .map((cluster) => `${cluster.cores.length} x ${formatFrequency(cluster.mhz)}`)
     .join(" | ") || "Frequency access unavailable";
@@ -199,7 +198,8 @@ function profileFacts(profile) {
     ["Clusters", clusters],
     ["ISA", isa],
     ["GPU", gpu.name || "Not detected"],
-    ["NPU", accelerators.npu_hardware || "Not detected"],
+    ["Vulkan", gpu.supports_vulkan ? "Candidate — benchmark must beat CPU" : "Not available"],
+    ["Runtime", "CPU + Vulkan; free RAM selects graph/KV budget; direct answers only below 50% battery"],
     ["Caches", caches]
   ].map(([name, value]) => `<div class="profile-detail"><b>${escapeHtml(name)}</b>${escapeHtml(value)}</div>`).join("");
 }

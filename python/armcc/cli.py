@@ -109,6 +109,9 @@ def _buildCppCompileCommand(
         "--weights", str(work_path / "weights_f16.bin"),
         "--output", output_path,
     ]
+    processor_dir = work_path / "processor"
+    if processor_dir.is_dir():
+        cmd += ["--processor-dir", str(processor_dir)]
     if execution_policy_path:
         cmd += ["--execution-policy", execution_policy_path]
     if calibration_path:
@@ -183,7 +186,11 @@ def _cmd_compile(args) -> int:
             return 1
     execution_policy_path = write_execution_policy(
         Path(work_dir) / "execution_policy.json",
-        build_execution_policy(live_profile, context_lengths),
+        build_execution_policy(
+            live_profile, context_lengths,
+            capabilities=loaded.modalities,
+            quantization=args.quantization,
+        ),
     )
     print(f"      ✓ Tokenizer saved, runtime config generated")
     print("      ✓ CPU/Vulkan execution policy generated (NPU disabled)")
@@ -197,7 +204,9 @@ def _cmd_compile(args) -> int:
 
     # ── Step 4: Calibration (optional) ───────────────────────────────────────
     calib_path = None
-    if not args.skip_calibration and args.quantization in ("int8", "int4", "mixed"):
+    from armcc.modalities import model_requires_processor
+    media_calibration_requires_samples = model_requires_processor(loaded.modalities)
+    if not args.skip_calibration and args.quantization in ("int8", "int4", "mixed") and not media_calibration_requires_samples:
         print(f"[4/5] Running calibration ({args.calibration_samples} samples) ...")
         runner = CalibrationRunner(
             loaded,
@@ -209,6 +218,9 @@ def _cmd_compile(args) -> int:
         calib_path = os.path.join(work_dir, "calibration.json")
         runner.save(calib_result, calib_path)
         print(f"      ✓ {len(calib_result.stats)} tensors profiled")
+    elif media_calibration_requires_samples and not args.skip_calibration:
+        print("[4/5] Skipping generic text calibration for a media model")
+        print("      ! Provide representative image/audio/video calibration samples before enabling media quantization calibration.")
     else:
         print("[4/5] Skipping calibration")
 

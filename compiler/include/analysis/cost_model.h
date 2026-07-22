@@ -159,6 +159,10 @@ public:
   // Load a single device profile
   void loadProfile(const std::string& jsonPath);
 
+  // Register an already-probed profile without writing it to disk. This is
+  // used by the live runtime and by tests that construct synthetic devices.
+  void addProfile(DeviceProfile profile);
+
   // Get a loaded profile
   const DeviceProfile* getProfile(ir::SoCID id) const;
   const DeviceProfile* getProfile(const std::string& name) const;

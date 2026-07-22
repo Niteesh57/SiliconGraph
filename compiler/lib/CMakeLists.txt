@@ -59,6 +59,18 @@ target_include_directories(armcc_memory PUBLIC
 )
 target_link_libraries(armcc_memory PUBLIC armcc_ir armcc_analysis)
 
+# â”€â”€ Runtime resource controller â”€â”€
+add_library(armcc_runtime STATIC
+  runtime/resource_controller.cpp
+)
+target_include_directories(armcc_runtime PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/compiler/include>
+)
+target_link_libraries(armcc_runtime PUBLIC
+  armcc_generator
+  nlohmann_json::nlohmann_json
+)
+
 # ── Package library ──────────────────────────────────────────────────────────
 add_library(armcc_package STATIC
   package/package_generator.cpp
@@ -71,6 +83,7 @@ target_link_libraries(armcc_package PUBLIC
   armcc_ir
   armcc_generator
   armcc_memory
+  armcc_runtime
   nlohmann_json::nlohmann_json
   libzip::zip
 )

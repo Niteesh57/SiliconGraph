@@ -145,6 +145,9 @@ bool PackageGenerator::generate(
   if (!opts_.device_profile_path.empty()) {
     manifest.device_profile_path = "device_profile.json";
   }
+  if (!opts_.execution_policy_path.empty()) {
+    manifest.execution_policy_path = "execution_policy.json";
+  }
 
   int progress = 0;
   auto report = [&](const std::string& step) {
@@ -161,7 +164,7 @@ bool PackageGenerator::generate(
   report("Writing model weights ...");
   if (!writeWeights(za, source_graph, mem_plan, manifest)) goto fail;
 
-  // 3. Write kernels (stubs in Phase 1)
+  // 3. Write CPU/Vulkan kernel descriptors (Phase 1 stubs)
   report("Writing kernel objects ...");
   if (!writeKernels(za, manifest)) goto fail;
 
@@ -169,23 +172,31 @@ bool PackageGenerator::generate(
   report("Writing tokenizer assets ...");
   if (!writeTokenizer(za, manifest)) goto fail;
 
-  // 5. Write the exact live device profile used during compilation.
+  // 5. Copy image/audio/video processor assets when the package has them.
+  report("Writing multimodal processor assets ...");
+  if (!writeProcessor(za, manifest)) goto fail;
+
+  // 6. Write the exact live device profile used during compilation.
   report("Writing device profile ...");
   if (!writeDeviceProfile(za)) goto fail;
 
-  // 6. Write runtime config
+  // 7. Write runtime policy. It is the authority for CPU/Vulkan selection.
+  report("Writing CPU/Vulkan execution policy ...");
+  if (!writeExecutionPolicy(za)) goto fail;
+
+  // 8. Write runtime config
   report("Writing runtime config ...");
   if (!writeRuntimeConfig(za, runtime_cfg)) goto fail;
 
-  // 7. Write memory maps
+  // 9. Write memory maps
   report("Writing memory maps ...");
   if (!writeMemoryMaps(za, mem_plan)) goto fail;
 
-  // 8. Build and write selector (selector.wasm stub + selector JSON)
+  // 10. Build and write selector (selector.wasm stub + selector JSON)
   report("Writing graph selector ...");
   if (!writeSelectorWasm(za, graph_family)) goto fail;
 
-  // 9. Write manifest (last — references everything above)
+  // 10. Write manifest (last — references everything above)
   report("Writing manifest.json ...");
   if (!writeManifest(za, manifest)) goto fail;
 
@@ -229,10 +240,18 @@ bool PackageGenerator::writeGraphs(void* za,
                              (cg.conditions.thermal == ir::ThermalState::Warm)    ? "warm"    : "hot";
     ge.latency_mode        = (cg.conditions.latency_mode == generator::LatencyMode::Interactive) ?
                              "interactive" : "background";
+    ge.execution_backend   = cg.conditions.execution_backend == ir::ExecUnit::GPU ? "vulkan" : "cpu";
+    ge.kernel_ids          = ge.execution_backend == "vulkan"
+      ? std::vector<std::string>{"gemm_fp16_vulkan", "softmax_vulkan"}
+      : std::vector<std::string>{"matmul_int8_neon", "attn_fp16_neon"};
     ge.estimated_ttft_ms   = cg.estimated_ttft_ms;
     ge.estimated_tpot_ms   = cg.estimated_tpot_ms;
     ge.peak_memory_bytes   = cg.peak_memory_bytes;
     ge.weight_bytes        = (cg.graph ? cg.graph->weight_bytes : 0);
+    ge.activation_bytes    = (cg.graph ? cg.graph->activation_bytes : 0);
+    ge.kv_cache_bytes      = (cg.graph ? cg.graph->kv_cache_bytes : 0);
+    ge.kv_bytes_per_token  = (cg.graph && cg.graph->kv_cache.max_seq_len > 0)
+      ? cg.graph->kv_cache_bytes / cg.graph->kv_cache.max_seq_len : 0;
     manifest.graphs.push_back(ge);
 
     // Write serialized graph bytes
@@ -338,11 +357,11 @@ bool PackageGenerator::writeWeights(void* za,
 }
 
 // ---------------------------------------------------------------------------
-// writeKernels — Phase 1: stubs
+// writeKernels — CPU/Vulkan descriptors (Phase 1 stubs)
 // ---------------------------------------------------------------------------
 bool PackageGenerator::writeKernels(void* za, PackageManifest& manifest) {
-  // In Phase 1, write kernel descriptor stubs.
-  // Phase 2 will have actual compiled kernel objects.
+  // Packages expose only the open CPU and Vulkan paths. Vendor NPU/DSP
+  // descriptors are intentionally not emitted.
   struct KernelStub {
     std::string id, target_str, path, op_pattern;
     KernelTarget target;
@@ -351,11 +370,11 @@ bool PackageGenerator::writeKernels(void* za, PackageManifest& manifest) {
   std::vector<KernelStub> stubs = {
     {"matmul_int8_neon",  "cpu_neon",    "kernels/arm_neon/matmul_int8.o",    "MatMul",  KernelTarget::CPU_NEON},
     {"attn_fp16_neon",    "cpu_neon",    "kernels/arm_neon/attention_fp16.o", "GroupQueryAttention", KernelTarget::CPU_NEON},
-    {"gemm_fp16_vulkan",  "gpu_vulkan",  "kernels/gpu_vulkan/gemm_fp16.spv",  "GEMM",    KernelTarget::GPU_Vulkan},
-    {"softmax_vulkan",    "gpu_vulkan",  "kernels/gpu_vulkan/softmax.spv",    "Softmax", KernelTarget::GPU_Vulkan},
-    {"matmul_int4_htp",   "npu_htp",    "kernels/snapdragon_htp/matmul_int4.bin","MatMul",KernelTarget::NPU_HTP},
-    {"attn_int8_neuripilot","npu_np",   "kernels/mediatek_npu/attn_int8.bin","GroupQueryAttention",KernelTarget::NPU_NeuroPilot},
   };
+  if (opts_.include_vulkan) {
+    stubs.push_back({"gemm_fp16_vulkan", "gpu_vulkan", "kernels/gpu_vulkan/gemm_fp16.spv", "GEMM", KernelTarget::GPU_Vulkan});
+    stubs.push_back({"softmax_vulkan", "gpu_vulkan", "kernels/gpu_vulkan/softmax.spv", "Softmax", KernelTarget::GPU_Vulkan});
+  }
 
   for (auto& stub : stubs) {
     std::string content = "ARMKERNEL_STUB target=" + stub.target_str + " op=" + stub.op_pattern;
@@ -395,6 +414,28 @@ bool PackageGenerator::writeTokenizer(void* za, PackageManifest& manifest) {
 }
 
 // ---------------------------------------------------------------------------
+// writeProcessor
+// ---------------------------------------------------------------------------
+bool PackageGenerator::writeProcessor(void* za, PackageManifest& manifest) {
+  if (opts_.processor_dir.empty()) return true;
+  if (!fs::is_directory(opts_.processor_dir)) {
+    lastError_ = "Cannot read multimodal processor directory: " + opts_.processor_dir;
+    return false;
+  }
+
+  for (const auto& entry : fs::recursive_directory_iterator(opts_.processor_dir)) {
+    if (!entry.is_regular_file()) continue;
+    const std::string relative = fs::relative(entry.path(), opts_.processor_dir).generic_string();
+    if (!zipAddFile((zip_t*)za, "processor/" + relative, entry.path().string())) {
+      lastError_ = "Cannot package processor asset: " + entry.path().string();
+      return false;
+    }
+  }
+  manifest.processor_path = "processor/";
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 // writeDeviceProfile
 // ---------------------------------------------------------------------------
 bool PackageGenerator::writeDeviceProfile(void* za) {
@@ -405,6 +446,22 @@ bool PackageGenerator::writeDeviceProfile(void* za) {
   }
   if (!zipAddFile((zip_t*)za, "device_profile.json", opts_.device_profile_path)) {
     lastError_ = "Cannot package device profile";
+    return false;
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// writeExecutionPolicy
+// ---------------------------------------------------------------------------
+bool PackageGenerator::writeExecutionPolicy(void* za) {
+  if (opts_.execution_policy_path.empty()) return true;
+  if (!fs::is_regular_file(opts_.execution_policy_path)) {
+    lastError_ = "Cannot read execution policy: " + opts_.execution_policy_path;
+    return false;
+  }
+  if (!zipAddFile((zip_t*)za, "execution_policy.json", opts_.execution_policy_path)) {
+    lastError_ = "Cannot package execution policy";
     return false;
   }
   return true;
@@ -442,6 +499,8 @@ bool PackageGenerator::writeMemoryMaps(void* za, const memory::MemoryPlan& plan)
   kv["key_cache_bytes"]    = plan.kv_layout.key_cache_bytes;
   kv["val_cache_bytes"]    = plan.kv_layout.val_cache_bytes;
   kv["total_bytes"]        = plan.kv_layout.total_bytes;
+  kv["bytes_per_token"]    = plan.kv_layout.max_seq_len > 0
+    ? plan.kv_layout.total_bytes / plan.kv_layout.max_seq_len : 0;
   kv["layer_offsets_key"]  = plan.kv_layout.layer_offsets_key;
   kv["layer_offsets_val"]  = plan.kv_layout.layer_offsets_val;
   zipAddString((zip_t*)za, "memory_maps/kv_cache_layout.json", kv.dump(2));
@@ -585,10 +644,14 @@ std::string PackageManifest::toJSON(bool pretty) const {
     jg["context_length"]      = g.context_length;
     jg["thermal_state"]       = g.thermal_state;
     jg["latency_mode"]        = g.latency_mode;
+    jg["execution_backend"]   = g.execution_backend;
     jg["estimated_ttft_ms"]   = g.estimated_ttft_ms;
     jg["estimated_tpot_ms"]   = g.estimated_tpot_ms;
     jg["peak_memory_bytes"]   = g.peak_memory_bytes;
     jg["weight_bytes"]        = g.weight_bytes;
+    jg["activation_bytes"]    = g.activation_bytes;
+    jg["kv_cache_bytes"]      = g.kv_cache_bytes;
+    jg["kv_bytes_per_token"]  = g.kv_bytes_per_token;
     jg["kernel_ids"]          = g.kernel_ids;
     garr.push_back(jg);
   }
@@ -621,10 +684,12 @@ std::string PackageManifest::toJSON(bool pretty) const {
   j["weights"] = warr;
 
   j["tokenizer_path"]    = tokenizer_path;
+  if (!processor_path.empty()) j["processor_path"] = processor_path;
   j["selector_wasm_path"] = selector_wasm_path;
   j["runtime_config_path"] = runtime_config_path;
   j["memory_maps_path"]  = memory_maps_path;
   if (!device_profile_path.empty()) j["device_profile_path"] = device_profile_path;
+  if (!execution_policy_path.empty()) j["execution_policy_path"] = execution_policy_path;
 
   return pretty ? j.dump(2) : j.dump();
 }
@@ -640,10 +705,6 @@ const char* kernelTargetToString(KernelTarget t) {
     case KernelTarget::GPU_Vulkan:      return "gpu_vulkan";
     case KernelTarget::GPU_OpenCL:      return "gpu_opencl";
     case KernelTarget::GPU_Metal:       return "gpu_metal";
-    case KernelTarget::NPU_HTP:         return "npu_htp";
-    case KernelTarget::NPU_NeuroPilot:  return "npu_neuripilot";
-    case KernelTarget::NPU_ANE:         return "npu_ane";
-    case KernelTarget::NPU_Xclipse:     return "npu_xclipse";
     default: return "unknown";
   }
 }
@@ -663,6 +724,16 @@ std::string RuntimeConfig::toJSON(bool pretty) const {
     : eos_token_ids;
   j["pad_token_id"]       = pad_token_id;
   j["chat_template"]      = chat_template;
+  json modalities;
+  modalities["schema_version"] = 1;
+  modalities["task"] = task;
+  modalities["inputs"] = input_modalities;
+  modalities["outputs"] = output_modalities;
+  modalities["primary_input"] = primary_input_modality;
+  modalities["primary_output"] = primary_output_modality;
+  modalities["native_status"] = modality_native_status;
+  modalities["notes"] = modality_notes;
+  j["modalities"] = modalities;
   return pretty ? j.dump(2) : j.dump();
 }
 
@@ -688,6 +759,16 @@ RuntimeConfig RuntimeConfig::fromJSON(const std::string& s) {
     cfg.eos_token_id       = cfg.eos_token_ids.front();
     cfg.pad_token_id       = j.value("pad_token_id", 0);
     cfg.chat_template      = j.value("chat_template", std::string(""));
+    if (j.contains("modalities") && j["modalities"].is_object()) {
+      const auto& modalities = j["modalities"];
+      cfg.task = modalities.value("task", std::string("text_generation"));
+      cfg.input_modalities = modalities.value("inputs", std::vector<std::string>{"text"});
+      cfg.output_modalities = modalities.value("outputs", std::vector<std::string>{"text"});
+      cfg.primary_input_modality = modalities.value("primary_input", std::string("text"));
+      cfg.primary_output_modality = modalities.value("primary_output", std::string("text"));
+      cfg.modality_native_status = modalities.value("native_status", std::string("supported"));
+      cfg.modality_notes = modalities.value("notes", std::vector<std::string>{});
+    }
   } catch (...) {}
   return cfg;
 }

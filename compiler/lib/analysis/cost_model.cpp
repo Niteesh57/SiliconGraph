@@ -218,6 +218,10 @@ void CostModel::loadProfile(const std::string& jsonPath) {
   }
 }
 
+void CostModel::addProfile(DeviceProfile profile) {
+  profiles_[static_cast<uint16_t>(profile.soc_id)] = std::move(profile);
+}
+
 const DeviceProfile* CostModel::getProfile(ir::SoCID id) const {
   auto it = profiles_.find(static_cast<uint16_t>(id));
   return it != profiles_.end() ? &it->second : nullptr;

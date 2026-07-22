@@ -8,6 +8,15 @@ ARM AI Compiler ingests open-source models from HuggingFace (Llama, Qwen, Gemma,
 
 Unlike llama.cpp, ONNX Runtime, or Cactus — which compile one graph — this compiler generates a **Graph Family**: many optimized graphs varying by hardware, precision (FP32/FP16/INT8/INT4/FP8), memory budget, context length, and thermal state. The runtime simply picks the best graph at deployment time.
 
+## Multimodal model contracts
+
+Packages can declare text, image, audio, video, embedding, image-generation,
+and audio-generation I/O. Image/audio/video packages include the model's
+Hugging Face processor assets alongside tokenizer assets, so the on-device
+runtime can apply the model's own preprocessing rules. See
+[the multimodal support guide](docs/multimodal_support.md) for native-runtime
+status and rollout order.
+
 ## Architecture
 
 ```

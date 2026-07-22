@@ -44,6 +44,10 @@ struct GraphConditions {
   LatencyMode    latency_mode    = LatencyMode::Interactive;
   int            battery_pct     = 90;
 
+  // CPU is always emitted. GPU represents the portable Vulkan candidate,
+  // never a vendor NPU, DSP, or proprietary delegate.
+  ir::ExecUnit   execution_backend = ir::ExecUnit::CPU;
+
   // Preferred execution units (empty = all available)
   std::vector<ir::ExecUnit> preferred_units;
 
@@ -101,6 +105,10 @@ struct GraphFamilySpec {
     LatencyMode::Interactive,
     LatencyMode::Background,
   };
+
+  // CPU is mandatory; Vulkan is added only when the live profile advertises
+  // Vulkan support. The runtime policy decides whether it actually wins.
+  std::vector<ir::ExecUnit> execution_backends = {ir::ExecUnit::CPU};
 
   // Maximum number of graphs in the family (0 = unlimited)
   // The generator will prune redundant graphs if over this limit.

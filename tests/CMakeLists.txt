@@ -6,9 +6,9 @@ include(GoogleTest)
 # ── Unit tests ───────────────────────────────────────────────────────────────
 add_executable(armcc_unit_tests
   unit/test_ir_types.cpp
-  unit/test_ir_graph.cpp
   unit/test_pass_manager.cpp
   unit/test_cost_model.cpp
+  unit/test_resource_controller.cpp
 )
 target_link_libraries(armcc_unit_tests PRIVATE
   armcc_all

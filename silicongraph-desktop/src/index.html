@@ -101,7 +101,7 @@
             <input id="output-input" placeholder="Defaults to <project>\output" />
             <button class="button primary" id="compile-button" type="submit" disabled>Compile for selected device</button>
           </form>
-          <p class="hint">The package stores the selected device's generated live profile and requested context buckets. Compilation needs Python dependencies and the native <code>armcc-compiler</code> binary.</p>
+          <p class="hint">The package stores this device's capacity-aware CPU/Vulkan policy. At runtime it selects only a graph and KV-cache size that fit current free RAM. Vulkan is used only after its benchmark beats CPU; below 50% battery it uses direct, concise answers without changing validated precision. For media-capable models, image/audio/video are admitted only on FP32/FP16 or INT8/mixed graphs; INT4/FP8 packages remain text-only.</p>
         </section>
       </section>
 

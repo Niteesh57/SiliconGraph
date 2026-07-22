@@ -43,3 +43,7 @@ node_modules/
 silicongraph-desktop/node_modules/
 silicongraph-desktop/dist/
 silicongraph-desktop/release/
+silicongraph-mobile/.gradle/
+silicongraph-mobile/android/.cxx/
+silicongraph-mobile/android/app/build/
+silicongraph-mobile/node_modules/

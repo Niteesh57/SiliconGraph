@@ -191,7 +191,7 @@ function normalizedVendor(value) {
 function buildDynamicProfile(device) {
   const topology = device.cpuTopology;
   const gpuRenderer = device.gpu?.renderer || "";
-  const isQualcomm = normalizedVendor(device.socManufacturer) === "qualcomm" || /^sm\d+/i.test(device.socModel);
+  const supportsVulkan = Boolean(device.gpu?.vulkanHardware);
   return {
     schema_version: "1.0",
     profile_id: `detected_${device.serial.replace(/[^a-zA-Z0-9_-]+/g, "_")}`,
@@ -233,16 +233,14 @@ function buildDynamicProfile(device) {
     gpu: {
       present: Boolean(gpuRenderer || device.gpu?.hardware),
       name: gpuRenderer || device.gpu?.hardware || "Detected GPU",
-      supports_vulkan: Boolean(device.gpu?.vulkanHardware),
+      supports_vulkan: supportsVulkan,
       supports_opencl: false,
       supports_metal: false
     },
-    // We report hardware discovery separately. `present` stays false until a
-    // validated QNN/other delegate is installed, preventing unsafe NPU choice.
-    npu: { present: false },
-    detected_accelerators: {
-      npu_hardware: isQualcomm ? "Qualcomm Hexagon / HTP (delegate not configured)" : "Unknown",
-      gpu_renderer: gpuRenderer || "Unknown"
+    execution: {
+      allowed_backends: supportsVulkan ? ["cpu", "vulkan"] : ["cpu"],
+      vulkan_selection: "requires_end_to_end_benchmark_win",
+      constrained_mode: "cpu_int8_or_int4_smallest_kv_cache"
     },
     runtime_state: {
       memory_total_mb: device.memory?.totalMb ?? null,
@@ -258,9 +256,7 @@ function buildDynamicProfile(device) {
     },
     supported_dtypes: {
       cpu: ["f32", "f16", "i8", "u8"],
-      gpu: [],
-      npu: [],
-      dsp: []
+      gpu: supportsVulkan ? ["f16"] : []
     },
     cost_table: []
   };

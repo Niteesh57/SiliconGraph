@@ -30,10 +30,13 @@ struct RuntimeDeviceState {
   LatencyMode    latency_target   = LatencyMode::Interactive;
   uint32_t       context_length   = 512;
 
-  // Which execution units are currently available?
-  bool gpu_available = true;
-  bool npu_available = true;
-  bool dsp_available = true;
+  // The optional Vulkan candidate is considered only after its measured
+  // end-to-end latency beats CPU. No NPU/DSP delegate is represented here.
+  bool vulkan_benchmark_wins = false;
+
+  // Media encoders are admitted only on full or medium precision graph
+  // variants. INT4/FP8 remain an intentional text-only execution path.
+  bool require_medium_or_higher_precision = false;
 };
 
 // ---------------------------------------------------------------------------
@@ -62,6 +65,17 @@ public:
 
   // Select with fallback (guaranteed to return something)
   uint32_t selectWithFallback(const RuntimeDeviceState& state) const;
+
+  // Select only if a graph satisfies every hard resource constraint. Runtime
+  // resource control must use this rather than the conservative fallback.
+  std::optional<uint32_t> selectViable(const RuntimeDeviceState& state) const;
+
+  // True when the graph is the optional Vulkan candidate rather than CPU.
+  bool isVulkanGraph(uint32_t graph_index) const;
+
+  // Precision of a selected graph, used for an auditable media admission
+  // decision in the runtime.
+  std::optional<ir::DType> quantDTypeForGraph(uint32_t graph_index) const;
 
   // Serialize the selector index to JSON (written into manifest.json)
   std::string toJSON() const;

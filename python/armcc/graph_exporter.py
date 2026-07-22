@@ -29,6 +29,60 @@ class GraphExportError(RuntimeError):
     """Raised when an exact runnable graph cannot be extracted."""
 
 
+class _Idefics3StaticImageWrapper(torch.nn.Module):
+    """Export Idefics3/SmolVLM assuming one non-padding image per request.
+
+    Upstream Idefics3 removes padded images using boolean indexing. That is a
+    valid eager optimisation but creates a data-dependent dynamic shape that
+    ``torch.export`` cannot represent. SiliconGraph packages a fixed batch-one
+    graph and the matching processor is configured with image splitting off,
+    so every image slot is real. This wrapper preserves the vision encoder,
+    connector, merger, and language head while removing only that padding
+    optimisation.
+    """
+
+    def __init__(self, model: torch.nn.Module):
+        super().__init__()
+        self.model = model
+
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        pixel_values: torch.Tensor,
+        pixel_attention_mask: torch.Tensor,
+        use_cache: bool = False,
+        return_dict: bool = False,
+    ) -> torch.Tensor:
+        del use_cache, return_dict
+        core = self.model.model
+        batch_size, num_images, _, _, _ = pixel_values.shape
+        pixel_values = pixel_values.to(dtype=core.dtype).view(
+            batch_size * num_images, *pixel_values.shape[2:],
+        )
+        pixel_attention_mask = pixel_attention_mask.view(
+            batch_size * num_images, *pixel_attention_mask.shape[2:],
+        )
+        patch_size = core.config.vision_config.patch_size
+        patches = pixel_attention_mask.unfold(1, patch_size, patch_size)
+        patches = patches.unfold(2, patch_size, patch_size)
+        patch_attention_mask = (patches.sum(dim=(-1, -2)) > 0).bool()
+        image_outputs = core.vision_model(
+            pixel_values=pixel_values,
+            patch_attention_mask=patch_attention_mask,
+            return_dict=True,
+        )
+        image_hidden_states = core.connector(image_outputs.last_hidden_state)
+        outputs = self.model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            image_hidden_states=image_hidden_states,
+            use_cache=False,
+            return_dict=False,
+        )
+        return outputs[0]
+
+
 @dataclass
 class ExportedGraph:
     """Serializable graph description ready for the C++ compiler."""
@@ -41,6 +95,8 @@ class ExportedGraph:
     intermediate_size: int
     vocab_size:  int
     max_position_embeddings: int
+    input_modalities: list[str] = field(default_factory=lambda: ["text"])
+    output_modalities: list[str] = field(default_factory=lambda: ["text"])
 
     # Ops: list of dicts with {id, op, inputs, outputs, attrs}
     nodes: list[dict] = field(default_factory=list)
@@ -125,6 +181,22 @@ def _dtype_to_str(dtype: torch.dtype) -> str:
     }.get(dtype, "f32")
 
 
+def _shape_dims(values: object) -> list[int]:
+    """Convert concrete/SymInt dimensions to ARM-IR's integer shape format.
+
+    ``torch.export`` may retain a symbolic image-count dimension even for a
+    fixed export sample. ARM-IR represents an unknown dimension as ``-1``;
+    keeping a raw SymInt would make the generated JSON invalid.
+    """
+    dims: list[int] = []
+    for value in values or ():
+        try:
+            dims.append(int(value))
+        except (TypeError, ValueError, RuntimeError):
+            dims.append(-1)
+    return dims
+
+
 class GraphExporter:
     """Exports a LoadedModel to an ExportedGraph via torch.export."""
 
@@ -161,7 +233,7 @@ class GraphExporter:
         try:
             logger.info("  Attempting torch.export ...")
             exported_program = torch.export.export(
-                loaded.model,
+                self._modelForExport(loaded),
                 args=(),
                 kwargs=example_inputs,
                 strict=False,
@@ -182,6 +254,8 @@ class GraphExporter:
             intermediate_size=loaded.intermediate_size,
             vocab_size=loaded.vocab_size,
             max_position_embeddings=loaded.max_position_embeddings,
+            input_modalities=list(getattr(getattr(loaded, "modalities", None), "inputs", ("text",))),
+            output_modalities=list(getattr(getattr(loaded, "modalities", None), "outputs", ("text",))),
         )
 
         if exported_program is not None:
@@ -202,6 +276,20 @@ class GraphExporter:
                     f"{len(graph.weight_files)} weight file(s)")
         return graph
 
+    @staticmethod
+    def _modelForExport(loaded: LoadedModel) -> torch.nn.Module:
+        """Return an exact static export wrapper when the model requires one."""
+        config = getattr(loaded, "config", None)
+        modalities = getattr(loaded, "modalities", None)
+        if (
+            str(getattr(config, "model_type", "")).lower() == "idefics3"
+            and modalities is not None
+            and getattr(modalities, "task", "") == "image_text_to_text"
+        ):
+            logger.info("  Using static Idefics3/SmolVLM image export wrapper")
+            return _Idefics3StaticImageWrapper(loaded.model)
+        return loaded.model
+
     def saveJSON(self, graph: ExportedGraph, path: Optional[str] = None) -> str:
         """Save the ExportedGraph as a JSON file for the C++ compiler."""
         if path is None:
@@ -221,6 +309,8 @@ class GraphExporter:
             },
             "input_ids":   graph.input_ids,
             "output_ids":  graph.output_ids,
+            "input_modalities": graph.input_modalities,
+            "output_modalities": graph.output_modalities,
             "tensors":     graph.tensors,
             "nodes":       graph.nodes,
             "weight_files": graph.weight_files,
@@ -237,6 +327,10 @@ class GraphExporter:
     def _buildExampleInputs(self, loaded: LoadedModel,
                             context_length: int, batch_size: int) -> dict:
         """Build example inputs matching the model's expected signature."""
+        modalities = getattr(loaded, "modalities", None)
+        if modalities is not None and modalities.inputs != ("text",):
+            return self._buildMultimodalExampleInputs(loaded, batch_size)
+
         vocab = loaded.vocab_size or 32000
         # Use middle-of-vocab token IDs to avoid special tokens
         token_ids = torch.randint(
@@ -253,6 +347,95 @@ class GraphExporter:
             "use_cache": False,
             "return_dict": False,
         }
+
+    def _buildMultimodalExampleInputs(self, loaded: LoadedModel,
+                                      batch_size: int) -> dict:
+        """Create deterministic media examples through the model's own processor.
+
+        The processor owns resize, normalization, feature extraction, frame
+        sampling, and special media tokens.  Reimplementing that work in the
+        compiler would silently make an exported multimodal graph incorrect.
+        This is intentionally an export-time sample only; production media is
+        preprocessed by the packaged processor/runtime adapter.
+        """
+        processor = loaded.processor
+        if processor is None:
+            raise GraphExportError(
+                f"{loaded.modalities.task} requires an AutoProcessor, but the model did not provide one."
+            )
+
+        inputs = set(loaded.modalities.inputs)
+        kwargs: dict[str, object] = {"return_tensors": "pt"}
+        if "text" in inputs:
+            kwargs["text"] = [
+                self._buildMultimodalPrompt(processor, inputs)
+                for _ in range(batch_size)
+            ]
+
+        try:
+            from PIL import Image
+            import numpy as np
+
+            image = Image.new("RGB", (32, 32), color=(127, 127, 127))
+            if "image" in inputs:
+                kwargs["images"] = [image] * batch_size
+            if "audio" in inputs:
+                # One second of silence is a deterministic, valid waveform.
+                kwargs["audio"] = [np.zeros(16_000, dtype=np.float32)] * batch_size
+                kwargs["sampling_rate"] = 16_000
+            if "video" in inputs:
+                # Video processors normally accept a sequence of RGB frames.
+                frames = np.full((4, 32, 32, 3), 127, dtype=np.uint8)
+                kwargs["videos"] = [frames] * batch_size
+        except ImportError as exc:
+            raise GraphExportError(
+                "Multimodal export requires Pillow and NumPy for deterministic media examples."
+            ) from exc
+
+        try:
+            processed = processor(**kwargs)
+        except Exception as exc:
+            raise GraphExportError(
+                f"The Hugging Face processor could not build {loaded.modalities.task} export inputs: {exc}"
+            ) from exc
+
+        # BatchFeature is mapping-like; convert it to a regular dict because
+        # torch.export expects named keyword arguments.
+        return dict(processed)
+
+    @staticmethod
+    def _buildMultimodalPrompt(processor: object, inputs: set[str]) -> str:
+        """Format a processor-owned prompt with one placeholder per media item.
+
+        Vision-language processors do not share a universal image-token
+        spelling. For example, SmolVLM/Idefics requires ``<image>`` in the
+        prompt and rejects an otherwise-valid image tensor without it. Prefer
+        the source model's chat template so image/audio/video markers and role
+        tokens always agree with its processor.
+        """
+        content: list[dict[str, str]] = []
+        for modality in ("image", "audio", "video"):
+            if modality in inputs:
+                content.append({"type": modality})
+        content.append({"type": "text", "text": "Describe the supplied media."})
+        messages = [{"role": "user", "content": content}]
+
+        apply_template = getattr(processor, "apply_chat_template", None)
+        if callable(apply_template):
+            try:
+                prompt = apply_template(
+                    messages, add_generation_prompt=True, tokenize=False,
+                )
+                if isinstance(prompt, str) and prompt:
+                    return prompt
+            except (TypeError, ValueError, KeyError, NotImplementedError):
+                # Some processors do not implement a multimodal template; use
+                # explicit common placeholders below and let __call__ validate.
+                pass
+
+        placeholders = " ".join(f"<{modality}>" for modality in ("image", "audio", "video")
+                                if modality in inputs)
+        return f"{placeholders} Describe the supplied media.".strip()
 
     def _convertExportedProgram(self, ep, graph: ExportedGraph,
                                  loaded: LoadedModel) -> None:
@@ -274,10 +457,10 @@ class GraphExporter:
                 # some FX paths use a dict. Support both representations.
                 tensor_meta = node.meta.get("tensor_meta")
                 if isinstance(tensor_meta, dict):
-                    shape = list(tensor_meta.get("shape", []))
+                    shape = _shape_dims(tensor_meta.get("shape", []))
                     meta_dtype = tensor_meta.get("dtype", torch.float32)
                 else:
-                    shape = list(getattr(tensor_meta, "shape", []))
+                    shape = _shape_dims(getattr(tensor_meta, "shape", []))
                     meta_dtype = getattr(tensor_meta, "dtype", torch.float32)
                 dtype = _dtype_to_str(meta_dtype)
                 graph.tensors.append({
@@ -319,7 +502,7 @@ class GraphExporter:
 
                 # Output tensor metadata
                 meta = node.meta.get("tensor_meta", {})
-                shape = list(getattr(meta, "shape", []))
+                shape = _shape_dims(getattr(meta, "shape", []))
                 dtype = _dtype_to_str(getattr(meta, "dtype", torch.float32))
 
                 graph.tensors.append({

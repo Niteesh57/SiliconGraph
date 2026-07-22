@@ -40,10 +40,6 @@ enum class KernelTarget : uint8_t {
   GPU_Vulkan,
   GPU_OpenCL,
   GPU_Metal,
-  NPU_HTP,         // Qualcomm Hexagon HTP
-  NPU_NeuroPilot,  // MediaTek NeuroPilot
-  NPU_ANE,         // Apple Neural Engine (CoreML)
-  NPU_Xclipse,     // Samsung Xclipse
 };
 
 const char* kernelTargetToString(KernelTarget t);
@@ -75,6 +71,7 @@ struct GraphEntry {
   uint32_t       context_length;
   std::string    thermal_state;
   std::string    latency_mode;
+  std::string    execution_backend; // "cpu" or "vulkan"
 
   // Performance estimates
   float          estimated_ttft_ms;   // Time-to-first-token
@@ -83,6 +80,9 @@ struct GraphEntry {
   // Memory
   uint64_t       peak_memory_bytes;
   uint64_t       weight_bytes;
+  uint64_t       activation_bytes;
+  uint64_t       kv_cache_bytes;
+  uint64_t       kv_bytes_per_token;
 
   // Kernel references (IDs of KernelEntry)
   std::vector<std::string> kernel_ids;
@@ -126,10 +126,12 @@ struct PackageManifest {
 
   // Paths to special files
   std::string    tokenizer_path    = "tokenizer/";
+  std::string    processor_path;
   std::string    selector_wasm_path = "selector.wasm";
   std::string    runtime_config_path = "runtime_config.json";
   std::string    memory_maps_path  = "memory_maps/";
   std::string    device_profile_path;
+  std::string    execution_policy_path;
 
   // Serialization
   std::string toJSON(bool pretty = true) const;
@@ -158,6 +160,16 @@ struct RuntimeConfig {
 
   // Chat template
   std::string chat_template;
+
+  // Model I/O contract. Processor assets are packaged separately when a
+  // model needs image, audio, or video preprocessing.
+  std::string task = "text_generation";
+  std::vector<std::string> input_modalities{"text"};
+  std::vector<std::string> output_modalities{"text"};
+  std::string primary_input_modality = "text";
+  std::string primary_output_modality = "text";
+  std::string modality_native_status = "supported";
+  std::vector<std::string> modality_notes;
 
   std::string toJSON(bool pretty = true) const;
   static RuntimeConfig fromJSON(const std::string& json);

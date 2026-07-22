@@ -16,6 +16,7 @@ from pathlib import Path
 REQUIRED_FILES = {
     "manifest.json",
     "device_profile.json",
+    "execution_policy.json",
     "runtime_config.json",
     "selector_index.json",
 }
@@ -44,7 +45,8 @@ def main() -> int:
 
             manifest = json.loads(archive.read("manifest.json"))
             profile = json.loads(archive.read("device_profile.json"))
-            json.loads(archive.read("runtime_config.json"))
+            execution_policy = json.loads(archive.read("execution_policy.json"))
+            runtime_config = json.loads(archive.read("runtime_config.json"))
 
             graphs = manifest.get("graphs", [])
             weights = manifest.get("weights", [])
@@ -53,10 +55,25 @@ def main() -> int:
             if not weights:
                 fail("manifest has no model weights")
 
+            modalities = runtime_config.get("modalities", {})
+            media_inputs = set(modalities.get("inputs", [])) & {"image", "audio", "video"}
+            if media_inputs:
+                processor_path = manifest.get("processor_path")
+                if not processor_path or not any(name.startswith(processor_path) for name in names):
+                    fail("multimodal package has no processor assets")
+
             for graph in graphs:
                 path = graph.get("path")
                 if not path or path not in names:
                     fail(f"graph entry is missing: {path or '<no path>'}")
+                if graph.get("execution_backend", "cpu") not in {"cpu", "vulkan"}:
+                    fail(f"unsupported graph backend: {graph.get('execution_backend')}")
+                if graph.get("peak_memory_bytes", 0) < (
+                    graph.get("weight_bytes", 0)
+                    + graph.get("activation_bytes", 0)
+                    + graph.get("kv_cache_bytes", 0)
+                ):
+                    fail(f"graph peak-memory accounting excludes a required arena: {path}")
 
             for weight in weights:
                 path = weight.get("path")
@@ -66,6 +83,29 @@ def main() -> int:
                 expected_size = weight.get("size_bytes")
                 if expected_size is not None and actual_size != expected_size:
                     fail(f"weight size mismatch for {path}: {actual_size} != {expected_size}")
+
+            backends = execution_policy.get("backends", {})
+            if backends.get("cpu", {}).get("enabled") is not True:
+                fail("execution policy does not enable the required CPU backend")
+            if "npu" in backends:
+                fail("execution policy unexpectedly contains an NPU backend")
+            memory_policy = execution_policy.get("memory", {})
+            if memory_policy.get("always_enforced") is not True:
+                fail("execution policy must enforce current free-RAM limits")
+            if memory_policy.get("on_insufficient_memory") != "refuse_before_allocation":
+                fail("execution policy must refuse unsafe allocations before OOM")
+            if not execution_policy.get("device_capacity", {}).get("graph_memory_budgets_mb"):
+                fail("execution policy has no capacity-aware graph budgets")
+            battery_policy = execution_policy.get("battery_aware", {})
+            if battery_policy.get("when", {}).get("battery_pct_below") != 50:
+                fail("direct-answer mode must start only below 50% battery")
+            if battery_policy.get("precision") != "unchanged_quality_validated_variant":
+                fail("battery mode must not lower numerical precision")
+
+            for kernel in manifest.get("kernels", []):
+                target = str(kernel.get("target", ""))
+                if "npu" in target or "dsp" in target:
+                    fail(f"package unexpectedly contains a non-CPU/Vulkan kernel: {target}")
 
             profile_id = str(profile.get("profile_id", ""))
             serial = (

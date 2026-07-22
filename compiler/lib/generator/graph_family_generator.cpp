@@ -24,6 +24,7 @@ std::string GraphConditions::toKey() const {
   std::ostringstream oss;
   oss << ir::socIDToString(soc_id) << "_"
       << ir::dtypeToString(quant_dtype)
+      << (execution_backend == ir::ExecUnit::GPU ? "_vulkan" : "_cpu")
       << (mixed_precision ? "_mixed" : "") << "_"
       << memory_mb << "mb_"
       << context_length << "ctx_"
@@ -68,10 +69,10 @@ size_t GraphFamilyGenerator::estimateGraphCount(const GraphFamilySpec& spec) con
   for (auto soc : spec.target_socs) {
     for (auto q : spec.quant_dtypes) {
       for (auto ctx : spec.context_lengths) {
-        for (auto mem : spec.memory_budgets_mb) {
-          for (auto th : spec.thermal_states) {
-            for (auto lat : spec.latency_modes) {
-              count++;
+      for (auto mem : spec.memory_budgets_mb) {
+        for (auto th : spec.thermal_states) {
+          for (auto lat : spec.latency_modes) {
+              count += std::max<size_t>(1, spec.execution_backends.size());
             }
           }
         }
@@ -124,20 +125,27 @@ std::vector<CompiledGraph> GraphFamilyGenerator::generate(
 
           for (auto thermal : spec.thermal_states) {
             for (auto latency : spec.latency_modes) {
-              GraphConditions conds;
-              conds.soc_id          = soc_id;
-              conds.quant_dtype     = quant_dtype;
-              conds.mixed_precision = false;
-              conds.memory_mb       = mem_mb;
-              conds.context_length  = ctx_len;
-              conds.thermal         = thermal;
-              conds.latency_mode    = latency;
-              conds.battery_pct     = (thermal == ir::ThermalState::Hot) ? 20 : 90;
+              for (auto backend : spec.execution_backends) {
+                if (backend == ir::ExecUnit::GPU && (!dev->has_gpu || !dev->supports_vulkan)) {
+                  continue;
+                }
+                GraphConditions conds;
+                conds.soc_id          = soc_id;
+                conds.quant_dtype     = quant_dtype;
+                conds.mixed_precision = false;
+                conds.memory_mb       = mem_mb;
+                conds.context_length  = ctx_len;
+                conds.thermal         = thermal;
+                conds.latency_mode    = latency;
+                conds.battery_pct     = (thermal == ir::ThermalState::Hot) ? 20 : 90;
+                conds.execution_backend = backend;
+                conds.preferred_units = {backend};
 
-              CompiledGraph cg = compileOneGraph(sourceGraph, conds);
-              cg.conditions   = conds;
-              family.push_back(std::move(cg));
-              graphIndex++;
+                CompiledGraph cg = compileOneGraph(sourceGraph, conds);
+                cg.conditions   = conds;
+                family.push_back(std::move(cg));
+                graphIndex++;
+              }
             }
           }
         }
@@ -147,20 +155,27 @@ std::vector<CompiledGraph> GraphFamilyGenerator::generate(
       if (spec.include_mixed_precision &&
           (quant_dtype == ir::DType::I4 || quant_dtype == ir::DType::I8)) {
         for (auto ctx_len : spec.context_lengths) {
-          GraphConditions conds;
-          conds.soc_id          = soc_id;
-          conds.quant_dtype     = quant_dtype;
-          conds.mixed_precision = true;
-          conds.memory_mb       = spec.memory_budgets_mb.back();
-          conds.context_length  = ctx_len;
-          conds.thermal         = ir::ThermalState::Nominal;
-          conds.latency_mode    = LatencyMode::Interactive;
-          conds.battery_pct     = 90;
+          for (auto backend : spec.execution_backends) {
+            if (backend == ir::ExecUnit::GPU && (!dev->has_gpu || !dev->supports_vulkan)) {
+              continue;
+            }
+            GraphConditions conds;
+            conds.soc_id          = soc_id;
+            conds.quant_dtype     = quant_dtype;
+            conds.mixed_precision = true;
+            conds.memory_mb       = spec.memory_budgets_mb.back();
+            conds.context_length  = ctx_len;
+            conds.thermal         = ir::ThermalState::Nominal;
+            conds.latency_mode    = LatencyMode::Interactive;
+            conds.battery_pct     = 90;
+            conds.execution_backend = backend;
+            conds.preferred_units = {backend};
 
-          CompiledGraph cg = compileOneGraph(sourceGraph, conds);
-          cg.conditions   = conds;
-          family.push_back(std::move(cg));
-          graphIndex++;
+            CompiledGraph cg = compileOneGraph(sourceGraph, conds);
+            cg.conditions   = conds;
+            family.push_back(std::move(cg));
+            graphIndex++;
+          }
         }
       }
     }
@@ -213,6 +228,7 @@ CompiledGraph GraphFamilyGenerator::compileOneGraph(
   passes::PassOptions opts;
   opts.quant_group_size = 128;
   opts.context_lengths  = {conds.context_length};
+  opts.execution_backend = conds.execution_backend;
 
   if (dev) {
     opts.device = dev;
@@ -263,17 +279,8 @@ CompiledGraph GraphFamilyGenerator::compileOneGraph(
 
       float node_ms = 0.0f;
       switch (n.assigned_unit) {
-        case ir::ExecUnit::NPU: case ir::ExecUnit::APU:
-          node_ms = (n.cost_npu_ms >= 0) ? n.cost_npu_ms : n.cost_cpu_ms;
-          break;
         case ir::ExecUnit::GPU:
           node_ms = (n.cost_gpu_ms >= 0) ? n.cost_gpu_ms : n.cost_cpu_ms;
-          break;
-        case ir::ExecUnit::DSP:
-          node_ms = (n.cost_dsp_ms >= 0) ? n.cost_dsp_ms : n.cost_cpu_ms;
-          break;
-        case ir::ExecUnit::ANE:
-          node_ms = (n.cost_ane_ms >= 0) ? n.cost_ane_ms : n.cost_cpu_ms;
           break;
         default:
           node_ms = (n.cost_cpu_ms >= 0) ? n.cost_cpu_ms : 1.0f;
@@ -289,7 +296,8 @@ CompiledGraph GraphFamilyGenerator::compileOneGraph(
   }
 
   // Peak memory
-  cg.peak_memory_bytes = graph->activation_bytes + graph->weight_bytes;
+  cg.peak_memory_bytes = graph->activation_bytes + graph->weight_bytes +
+                          graph->kv_cache_bytes;
 
   // Serialize the compiled graph
   cg.serialized_graph = graph->serialize();

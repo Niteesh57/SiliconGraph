@@ -29,6 +29,10 @@ enum class ModelFamily : uint8_t {
   T5Style,      // Encoder-decoder
   MoE,          // Mixture of Experts (Mixtral)
   VisionLM,     // Multimodal (image + text)
+  AudioLM,      // Audio + text generation or speech-to-text
+  AudioGeneration, // Text-to-audio / speech synthesis
+  ImageGeneration, // Text/image-to-image generation
+  Embedding,    // Text/image/audio encoder producing vectors
   Custom,
 };
 

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 from .model_loader import LoadedModel
+from .modalities import ModalityCapabilities, model_requires_processor
 
 logger = logging.getLogger("armcc.hf_metadata")
 
@@ -48,6 +49,26 @@ class HFMetadataExtractor:
         except Exception as e:
             logger.warning(f"  Could not save tokenizer: {e}")
 
+        modalities = getattr(loaded, "modalities", None)
+        if modalities is None:
+            modalities = ModalityCapabilities(
+                task="text_generation", inputs=("text",), outputs=("text",),
+                primary_input="text", primary_output="text", native_status="supported",
+            )
+
+        # Tokenizer assets do not describe image/audio/video normalization.  A
+        # separate processor directory makes the package self-describing for a
+        # future Android runtime while preserving text-only package behaviour.
+        processor = getattr(loaded, "processor", None)
+        if processor is not None and model_requires_processor(modalities):
+            processor_dir = self.output_dir / "processor"
+            processor_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                processor.save_pretrained(str(processor_dir))
+                logger.info(f"  Processor saved → {processor_dir}")
+            except Exception as e:
+                logger.warning(f"  Could not save multimodal processor: {e}")
+
         # Build runtime config
         config = loaded.config
         gen_config = getattr(config, "generation_config", None)
@@ -66,6 +87,7 @@ class HFMetadataExtractor:
             "eos_token_ids":       eos_token_ids,
             "pad_token_id":        _token_id_list(getattr(config, "pad_token_id", None), 0)[0],
             "chat_template":       getattr(loaded.tokenizer, "chat_template", "") or "",
+            "modalities":          modalities.to_runtime_config(),
         }
 
         if gen_config:
@@ -94,6 +116,7 @@ class HFMetadataExtractor:
             "max_position_embeddings": loaded.max_position_embeddings,
             "total_params": loaded.total_params,
             "total_bytes":  loaded.total_bytes,
+            "modalities":   modalities.to_runtime_config(),
         }
         arch_path = self.output_dir / "model_arch.json"
         with open(arch_path, "w") as f:

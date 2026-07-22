@@ -57,6 +57,10 @@ struct PassOptions {
   // Context lengths to optimize for
   std::vector<uint32_t> context_lengths = {512, 2048};
 
+  // CPU graph or CPU+Vulkan graph. This compiler intentionally does not
+  // schedule proprietary NPU, DSP, or ANE paths.
+  ir::ExecUnit execution_backend = ir::ExecUnit::CPU;
+
   // Enable verbose pass logging
   bool verbose = false;
 

@@ -13,6 +13,14 @@
 
 namespace armcc {
 namespace generator {
+namespace {
+
+bool isLowPrecisionForMedia(ir::DType dtype) {
+  return dtype == ir::DType::I4 || dtype == ir::DType::I2 ||
+      dtype == ir::DType::F8_E4M3 || dtype == ir::DType::F8_E5M2;
+}
+
+} // namespace
 
 // ---------------------------------------------------------------------------
 // Constructor
@@ -42,10 +50,17 @@ float GraphSelector::score(const GraphSelectorEntry& e,
     }
   }
 
-  // Hard reject: requires GPU/NPU but unavailable
+  // A media request must never be silently routed to an INT4/FP8 graph.
+  // Mixed packages retain an INT8 candidate, so this is a hard constraint.
+  if (state.require_medium_or_higher_precision &&
+      isLowPrecisionForMedia(e.conditions.quant_dtype)) {
+    return std::numeric_limits<float>::max();
+  }
+
+  // Penalize a Vulkan candidate until an end-to-end benchmark proves it is
+  // faster than CPU. Generated packages never contain NPU/DSP candidates.
   for (auto unit : e.conditions.preferred_units) {
-    if (unit == ir::ExecUnit::GPU && !state.gpu_available) s += 1000.0f;
-    if ((unit == ir::ExecUnit::NPU || unit == ir::ExecUnit::APU) && !state.npu_available) s += 1000.0f;
+    if (unit == ir::ExecUnit::GPU && !state.vulkan_benchmark_wins) s += 1000.0f;
   }
 
   // Latency mode mismatch (soft penalty)
@@ -73,12 +88,6 @@ float GraphSelector::score(const GraphSelectorEntry& e,
     // Ideal is 60-80% RAM utilization
     if (usage_pct > 0.85f) s += 50.0f;       // Too tight
     else if (usage_pct < 0.3f) s += 10.0f;   // Wasteful (too conservative)
-  }
-
-  // Battery: under low battery, prefer lower precision (faster/more efficient)
-  if (state.battery_pct < 20) {
-    if (e.conditions.quant_dtype == ir::DType::I4) s -= 15.0f;  // Prefer INT4
-    if (e.conditions.quant_dtype == ir::DType::I8) s -= 5.0f;
   }
 
   // Latency: add estimated TPOT as baseline score
@@ -131,6 +140,39 @@ uint32_t GraphSelector::selectWithFallback(const RuntimeDeviceState& state) cons
   return min_mem_idx;
 }
 
+std::optional<uint32_t> GraphSelector::selectViable(
+    const RuntimeDeviceState& state) const {
+  float best_score = std::numeric_limits<float>::max();
+  std::optional<uint32_t> best_index;
+  for (const auto& entry : entries_) {
+    const float entry_score = score(entry, state);
+    if (entry_score < std::numeric_limits<float>::max() / 2 &&
+        entry_score < best_score) {
+      best_score = entry_score;
+      best_index = entry.graph_index;
+    }
+  }
+  return best_index;
+}
+
+bool GraphSelector::isVulkanGraph(uint32_t graph_index) const {
+  for (const auto& entry : entries_) {
+    if (entry.graph_index != graph_index) continue;
+    return std::find(entry.conditions.preferred_units.begin(),
+                     entry.conditions.preferred_units.end(),
+                     ir::ExecUnit::GPU) != entry.conditions.preferred_units.end();
+  }
+  return false;
+}
+
+std::optional<ir::DType> GraphSelector::quantDTypeForGraph(
+    uint32_t graph_index) const {
+  for (const auto& entry : entries_) {
+    if (entry.graph_index == graph_index) return entry.conditions.quant_dtype;
+  }
+  return std::nullopt;
+}
+
 // ---------------------------------------------------------------------------
 // Serialization: toJSON / fromJSON
 // ---------------------------------------------------------------------------
@@ -148,6 +190,7 @@ std::string GraphSelector::toJSON() const {
     je["context_length"]     = e.conditions.context_length;
     je["thermal"]            = (int)e.conditions.thermal;
     je["latency_mode"]       = (int)e.conditions.latency_mode;
+    je["execution_backend"]  = e.conditions.execution_backend == ir::ExecUnit::GPU ? "vulkan" : "cpu";
     j.push_back(je);
   }
   return j.dump(2);
@@ -169,6 +212,9 @@ GraphSelector GraphSelector::fromJSON(const std::string& jsonStr) {
       e.conditions.context_length = je.value("context_length", 2048u);
       e.conditions.thermal  = (ir::ThermalState)je.value("thermal", 0);
       e.conditions.latency_mode = (LatencyMode)je.value("latency_mode", 0);
+      e.conditions.execution_backend = je.value("execution_backend", "cpu") == "vulkan"
+          ? ir::ExecUnit::GPU : ir::ExecUnit::CPU;
+      e.conditions.preferred_units = {e.conditions.execution_backend};
       entries.push_back(e);
     }
   } catch (...) {}
